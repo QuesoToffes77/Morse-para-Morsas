@@ -43,7 +43,7 @@
   let held = false, others = false, ws, vibTimer = null;
 
   // Un toque corto llega como "1" y "0" casi juntos: se mantiene lo recibido un mínimo para que se note.
-  const MIN_MS = 150;
+  const MIN_MS = 60;
   let shownAt = 0, offTimer = null;
   function setOthers(v) {
     if (v) {
@@ -71,7 +71,7 @@
   }
 
   function connect() {
-    ws = new WebSocket('ws://' + location.host);
+    ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
     ws.onopen = () => { status.textContent = 'conectado'; if (held) ws.send('1'); };
     ws.onmessage = e => setOthers(e.data === '1');
     ws.onclose = () => { status.textContent = 'reconectando…'; setOthers(false); setTimeout(connect, 1000); };
@@ -90,6 +90,9 @@
   btn.addEventListener('contextmenu', e => e.preventDefault());
   addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat) { e.preventDefault(); send(true); } });
   addEventListener('keyup', e => { if (e.code === 'Space') send(false); });
+  // Si la app pierde el foco con el botón apretado, no llega el "soltar": lo soltamos nosotros.
+  addEventListener('blur', () => send(false));
+  document.addEventListener('visibilitychange', () => { if (document.hidden) send(false); });
 </script>
 </body>
 </html>

@@ -25,8 +25,20 @@ function notify() {
   }
 }
 
+// Latido: un celu que se durmió o perdió el wifi no avisa que se fue; sin esto su botón quedaría
+// "apretado" para siempre y la luz de los demás no se apagaría.
+setInterval(() => {
+  for (const c of wss.clients) {
+    if (c.alive === false) { c.terminate(); continue; } // dispara 'close' y lo saca de pressing
+    c.alive = false;
+    c.ping();
+  }
+}, 10000).unref();
+
 wss.on('connection', ws => {
   ws.last = null;
+  ws.alive = true;
+  ws.on('pong', () => { ws.alive = true; });
   ws.on('message', m => {
     if (String(m) === '1') pressing.add(ws); else pressing.delete(ws);
     notify();
