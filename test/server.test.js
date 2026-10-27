@@ -504,7 +504,7 @@ test('la página y el logo se sirven bien', withServer(async srv => {
   const page = await httpGet(srv, '/');
   assert.equal(page.status, 200);
   assert.match(page.type, /text\/html/);
-  assert.match(page.body.toString(), /<title>Morse<\/title>/);
+  assert.match(page.body.toString(), /<title>Morse para Morsas<\/title>/);
   for (const f of ['/logo.png', '/icon-192.png', '/favicon-32.png', '/favicon-64.png']) {
     const r = await httpGet(srv, f);
     assert.equal(r.status, 200, f);

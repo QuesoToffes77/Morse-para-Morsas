@@ -1,4 +1,11 @@
 plugins { id 'com.android.application' }
+
+// Clave de firma propia. Vive FUERA del repositorio (~/.morse-keys/keystore.properties) y nunca se sube a GitHub.
+// Si no existe (por ejemplo, otra persona que clonó el repo), se compila firmado con la clave de debug.
+def keyProps = new Properties()
+def keyFile = new File(System.getProperty('user.home'), '.morse-keys/keystore.properties')
+if (keyFile.exists()) keyFile.withInputStream { keyProps.load(it) }
+
 android {
     namespace 'com.morse.senal'
     compileSdk 34
@@ -10,6 +17,22 @@ android {
         versionName "2.0"
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+
+    if (keyProps['storeFile']) {
+        signingConfigs {
+            release {
+                storeFile file(keyProps['storeFile'])
+                storePassword keyProps['storePassword']
+                keyAlias keyProps['keyAlias']
+                keyPassword keyProps['keyPassword']
+            }
+        }
+    }
+    buildTypes {
+        release {
+            if (keyProps['storeFile']) signingConfig signingConfigs.release
+        }
+    }
 }
 
 dependencies {

@@ -49,9 +49,11 @@ public class SignalService extends Service {
     private static final int NOTIF_NEED_CODE = 2;
     private static final int CLOSE_NEED_CODE = 4001;   // el servidor pide (o rechaza) el código de acceso
     private static final int MIN_VIBRATION_MS = 100;
+    private static final long BUZZ_MS = 60_000;   // duración de cada vibración continua (se renueva 5 s antes de terminar)
     private static final long REQUEST_NOTIFICATION_MS = 20_000;   // igual que lo que espera el servidor
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable reconnect = this::connect;
+    private final Runnable renewBuzz = this::renew;
     private OkHttpClient client;
     private WebSocket socket;
     private Vibrator vibrator;
@@ -238,8 +240,8 @@ public class SignalService extends Service {
                 vibrating = true;
                 vibratingSince = System.currentTimeMillis();
                 // Repite hasta cancelar; USAGE_ALARM para que Android no la bloquee en segundo plano.
-                vibrator.vibrate(VibrationEffect.createWaveform(new long[]{0, 1000}, 0),
-                        new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build());
+                buzz();
+                main.postDelayed(renewBuzz, BUZZ_MS - 5_000);
             }
         } else if (vibrating && pendingStop == null) {
             long wait = Math.max(0, MIN_VIBRATION_MS - (System.currentTimeMillis() - vibratingSince));
@@ -248,7 +250,24 @@ public class SignalService extends Service {
         }
     }
 
+    /**
+     * Una sola vibración continua y larga. Un patrón que se repite (p. ej. 1 s, repetir) deja un corte corto
+     * en cada vuelta; renovándola antes de que termine no se nota ningún corte mientras se mantiene apretado.
+     */
+    private void buzz() {
+        // USAGE_ALARM para que Android no la bloquee en segundo plano.
+        vibrator.vibrate(VibrationEffect.createOneShot(BUZZ_MS, VibrationEffect.DEFAULT_AMPLITUDE),
+                new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build());
+    }
+
+    private void renew() {
+        if (!vibrating) return;
+        buzz();                                       // reemplaza la anterior sin pausa
+        main.postDelayed(renewBuzz, BUZZ_MS - 5_000);
+    }
+
     private void stopVibration() {
+        main.removeCallbacks(renewBuzz);
         if (pendingStop != null) { main.removeCallbacks(pendingStop); pendingStop = null; }
         vibrating = false;
         vibrator.cancel();

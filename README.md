@@ -55,7 +55,9 @@ netsh advfirewall firewall add rule name="Senal 3000" dir=in action=allow protoc
 
 Cómo cuida la batería: una sola conexión, sin wakelock ni consultas periódicas (solo un ping cada 30 s), reconexión con espera creciente (2 s hasta 60 s) y reintento inmediato cuando vuelve la red. Si el servidor está apagado o estás en otro wifi, casi no consume.
 
-Para recompilarlo hace falta JDK 17 y el SDK de Android; el proyecto está en [`android-app/`](android-app) y se genera con `gradle assembleDebug`.
+**Firma:** el APK está firmado con una clave propia (release), no la de debug de Android. Android puede seguir mostrando el aviso de "app de origen desconocido" la primera vez, pero la app ya tiene una firma estable. La clave vive fuera del repositorio, en `~/.morse-keys/` (`morse-release.jks` y `keystore.properties`), y **hay que guardarla en un lugar seguro**: sin ella no se pueden publicar actualizaciones que se instalen encima de la anterior. Si el archivo no existe (por ejemplo, otra persona que clonó el repo), se compila con la clave de debug. Se genera con `gradle assembleRelease`.
+
+Para recompilarlo hace falta JDK 17 y el SDK de Android; el proyecto está en [`android-app/`](android-app) y se genera con `gradle assembleRelease` (o `assembleDebug`).
 
 ## Cómo funciona
 
