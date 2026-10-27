@@ -40,6 +40,7 @@ public class MainActivity extends Activity {
                 if (r.isForMainFrame()) askAddress("No se pudo conectar. Revisá la dirección del servidor:");
             }
         });
+        web.setBackgroundColor(0xFF313338);   // sin destello blanco antes de que cargue la página
         setContentView(web);
         web.loadUrl(prefs.getString("url", SignalService.DEFAULT_URL));
 

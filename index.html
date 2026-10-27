@@ -2,115 +2,283 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1e1f22">
 <title>Señal</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%235865f2'/%3E%3Ccircle cx='10' cy='22' r='2.6' fill='white'/%3E%3Cpath d='M10 14a8 8 0 0 1 8 8M10 8a14 14 0 0 1 14 14' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
-  :root { --bg:#14161a; --fg:#e8eaed; --btn:#2a2f38; --red:#ff2b2b; --card:#1f232a; --acc:#4da3ff; --ok:#3ecf8e; --mute:#8b929c; }
+  :root {
+    color-scheme: dark;
+    --bg0:#1e1f22; --bg1:#2b2d31; --bg2:#313338; --bg3:#383a40; --bg4:#404249;
+    --text:#dbdee1; --strong:#f2f3f5; --muted:#949ba4;
+    --blurple:#5865f2; --blurple-h:#4752c4;
+    --green:#23a55a; --green-h:#1a8a49; --red:#f23f42; --red-h:#d83639; --yellow:#f0b232;
+    --line:rgba(255,255,255,.07); --focus:#00a8fc;
+    --font:"gg sans","Noto Sans","Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body { height:100%; margin:0; }
-  body { background:var(--bg); color:var(--fg); font-family:system-ui,sans-serif;
-         display:flex; flex-direction:column; align-items:center; user-select:none; }
-  .top { padding-top:6vh; text-align:center; }
-  .lamp { width:90px; height:90px; border-radius:50%; background:#3a1414; border:4px solid #555;
-          transition:background .05s, box-shadow .05s; margin:0 auto; }
-  .lamp.on { background:var(--red); box-shadow:0 0 40px 18px rgba(255,43,43,.7); border-color:#ff8a8a; }
-  .status { margin-top:16px; font-size:14px; opacity:.6; min-height:20px; }
-  .mid { flex:1; display:flex; align-items:center; justify-content:center; }
-  .btn { width:180px; height:180px; border-radius:50%; border:none; background:var(--btn);
-         box-shadow:0 8px 0 #111, 0 12px 24px rgba(0,0,0,.5); cursor:pointer; touch-action:none;
-         display:flex; align-items:center; justify-content:center; transition:transform .05s, box-shadow .05s; }
-  .btn.down { transform:translateY(6px); box-shadow:0 2px 0 #111, 0 4px 10px rgba(0,0,0,.5); background:#353b46; }
-  .btn svg { width:90px; height:90px; fill:none; stroke:var(--fg); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
-  .bottom { padding:12px 16px calc(18px + env(safe-area-inset-bottom)); }
-  .conn { background:var(--card); color:var(--fg); border:1px solid #333a44; border-radius:24px; padding:12px 28px;
-          font-size:16px; cursor:pointer; position:relative; }
-  .badge { background:var(--red); color:#fff; border-radius:10px; font-size:12px; padding:1px 7px; margin-left:6px; }
-  .badge[hidden] { display:none; }
+  [hidden] { display:none !important; }
+  html, body { height:100%; margin:0; }
+  body { background:var(--bg2); color:var(--text); font-family:var(--font); font-size:15px; line-height:1.4;
+         display:grid; grid-template-rows:auto 1fr auto; height:100dvh; overflow:hidden;
+         user-select:none; -webkit-touch-callout:none; }
+  button { font:inherit; color:inherit; cursor:pointer; }
+  :focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+  svg.ic { width:20px; height:20px; fill:currentColor; flex-shrink:0; }
 
-  /* Panel de conexión */
-  .sheet { position:fixed; inset:0; background:var(--bg); display:flex; flex-direction:column; z-index:10; }
-  .sheet[hidden] { display:none; }
-  .shead { display:flex; align-items:center; justify-content:space-between; padding:14px 16px 6px; }
-  .shead h2 { margin:0; font-size:18px; }
-  .me { font-size:13px; color:var(--mute); cursor:pointer; }
-  .x { background:none; border:none; color:var(--fg); font-size:26px; cursor:pointer; padding:0 4px; }
-  .tabs { display:flex; border-bottom:1px solid #2a2f38; }
-  .tab { flex:1; background:none; border:none; color:var(--mute); padding:12px 4px; font-size:15px; cursor:pointer;
-         border-bottom:2px solid transparent; }
-  .tab.act { color:var(--fg); border-bottom-color:var(--acc); }
-  .pbody { flex:1; overflow-y:auto; padding:8px 16px 24px; }
-  .pbody h3 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--mute); margin:18px 0 8px; }
-  .row { background:var(--card); border-radius:12px; padding:12px 14px; margin-bottom:8px; display:flex;
-         align-items:center; justify-content:space-between; gap:10px; }
-  .row .nm { min-width:0; overflow-wrap:anywhere; }
-  .row .sub { font-size:12px; color:var(--mute); margin-top:2px; }
-  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#555; margin-right:8px; }
-  .dot.on { background:var(--ok); }
-  .acts { display:flex; gap:6px; flex-shrink:0; }
-  .b { background:var(--acc); color:#06121f; border:none; border-radius:8px; padding:8px 12px; font-size:14px; cursor:pointer; }
-  .b.sec { background:#333a44; color:var(--fg); }
-  .b.bad { background:#5a2326; color:#ffd6d6; }
-  .b:disabled { opacity:.6; cursor:default; }
-  .empty { color:var(--mute); font-size:14px; padding:6px 2px; }
-  .note { background:#2b2a1c; color:#f0dc8a; border-radius:10px; padding:10px 12px; font-size:13px; margin:10px 0 0; }
-  .code { font-size:26px; letter-spacing:.2em; font-weight:700; }
+  /* ---------- Barra superior ---------- */
+  .appbar { display:flex; align-items:center; justify-content:space-between; gap:12px;
+            padding:max(10px, env(safe-area-inset-top)) 16px 10px; background:var(--bg2);
+            box-shadow:0 1px 0 var(--line), 0 1px 2px rgba(0,0,0,.2); position:relative; z-index:2; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; font-size:18px; color:var(--strong); letter-spacing:-.01em; }
+  .brand svg { width:32px; height:32px; display:block; }
+  .chip { display:flex; align-items:center; gap:8px; background:var(--bg1); border:0; border-radius:20px;
+          padding:4px 12px 4px 4px; max-width:50vw; color:var(--strong); font-weight:600; font-size:14px; }
+  .chip:hover { background:var(--bg0); }
+  .chip span.t { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  /* ---------- Avatares ---------- */
+  .av { --s:40px; width:var(--s); height:var(--s); border-radius:50%; display:inline-flex; align-items:center;
+        justify-content:center; color:#fff; font-weight:700; font-size:calc(var(--s) * .42); position:relative;
+        flex-shrink:0; text-transform:uppercase; }
+  .av .st { position:absolute; right:-2px; bottom:-2px; width:calc(var(--s) * .36); height:calc(var(--s) * .36);
+            min-width:10px; min-height:10px; border-radius:50%; background:#80848e; border:3px solid var(--ring, var(--bg1)); }
+  .av .st.on { background:var(--green); }
+  .stack { display:flex; }
+  .stack .av { margin-left:-8px; border:2px solid var(--bg1); }
+  .stack .av:first-child { margin-left:0; }
+
+  /* ---------- Escena principal ---------- */
+  .stage { display:flex; flex-direction:column; align-items:center; justify-content:space-between;
+           padding:18px 16px 8px; min-height:0; overflow:hidden; }
+  .pill { display:inline-flex; align-items:center; gap:8px; background:var(--bg1); border:1px solid var(--line);
+          border-radius:20px; padding:6px 14px 6px 12px; font-size:13px; color:var(--text); max-width:100%; }
+  .pill .pd { width:8px; height:8px; border-radius:50%; background:var(--muted); flex-shrink:0; }
+  .pill.ok .pd { background:var(--green); }
+  .pill.warn .pd { background:var(--yellow); }
+  .pill span.t { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lampwrap { text-align:center; margin-top:14px; }
+  .lamp { width:104px; height:104px; border-radius:50%; margin:0 auto;
+          background:radial-gradient(circle at 35% 30%, #5b2c2f, #2a1517 72%);
+          box-shadow:inset 0 0 0 4px var(--bg0), 0 0 0 4px #3d4047; transition:background .04s, box-shadow .04s; }
+  .lamp.on { background:radial-gradient(circle at 35% 30%, #ff9a9c, var(--red) 55%, #c1272a);
+             box-shadow:inset 0 0 0 4px #7a1517, 0 0 0 4px #ff7c7f, 0 0 54px 18px rgba(242,63,66,.6); }
+  .lamplabel { margin-top:16px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+  .lamp.on + .lamplabel { color:#ff9a9c; }
+  .btnwrap { text-align:center; padding-bottom:6px; }
+  .press { width:176px; height:176px; border-radius:50%; border:0; touch-action:none; display:flex;
+           align-items:center; justify-content:center; margin:0 auto;
+           background:radial-gradient(circle at 30% 24%, #7d87f6, var(--blurple) 58%);
+           box-shadow:0 10px 0 #3a43a3, 0 20px 32px rgba(0,0,0,.45), inset 0 2px 0 rgba(255,255,255,.18);
+           transition:transform .05s, box-shadow .05s; }
+  .press.down { transform:translateY(8px); background:radial-gradient(circle at 30% 24%, #6670e8, var(--blurple-h) 58%);
+                box-shadow:0 2px 0 #3a43a3, 0 6px 14px rgba(0,0,0,.45), inset 0 2px 0 rgba(255,255,255,.12); }
+  .press svg { width:84px; height:84px; fill:none; stroke:#fff; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+  .hint { margin:26px 0 0; font-size:13px; color:var(--muted); }
+
+  /* ---------- Barra inferior ---------- */
+  .dock { background:var(--bg1); border-top:1px solid var(--line); display:flex; justify-content:center;
+          padding:10px 16px calc(10px + env(safe-area-inset-bottom)); }
+  .dockbtn { display:flex; align-items:center; justify-content:center; gap:10px; width:100%; max-width:420px;
+             min-height:48px; background:var(--bg3); color:var(--strong); border:0; border-radius:24px;
+             font-weight:600; font-size:16px; transition:background .12s; }
+  .dockbtn:hover { background:var(--bg4); }
+  .badge { background:var(--red); color:#fff; border-radius:9px; min-width:18px; height:18px; padding:0 5px; font-size:11px;
+           font-weight:700; line-height:18px; text-align:center; display:inline-block; }
+
+  /* ---------- Panel de conexión ---------- */
+  .sheet { position:fixed; inset:0; z-index:20; display:flex; justify-content:center; background:rgba(0,0,0,.65);
+           animation:fade .15s ease-out; }
+  .card { width:100%; height:100%; background:var(--bg2); display:flex; flex-direction:column; animation:up .22s cubic-bezier(.2,.8,.2,1); }
+  .shead { display:flex; align-items:center; gap:8px; padding:max(8px, env(safe-area-inset-top)) 8px 8px;
+           box-shadow:0 1px 0 var(--line); }
+  .shead h2 { margin:0; font-size:17px; font-weight:700; color:var(--strong); flex:1; }
+  .iconbtn { width:40px; height:40px; border-radius:50%; border:0; background:none; color:var(--muted);
+             display:flex; align-items:center; justify-content:center; }
+  .iconbtn:hover { background:var(--bg3); color:var(--strong); }
+  .profile { display:flex; align-items:center; gap:14px; padding:16px; background:var(--bg1); margin:12px 16px 4px; border-radius:12px; }
+  .profile .pt { flex:1; min-width:0; }
+  .profile .pn { font-weight:700; font-size:17px; color:var(--strong); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .profile .ps { font-size:13px; color:var(--muted); }
+  .tabs { display:flex; margin:8px 16px 0; border-bottom:1px solid var(--line); gap:4px; }
+  .tab { flex:1; background:none; border:0; padding:12px 4px; color:var(--muted); font-weight:600; font-size:14px;
+         border-bottom:3px solid transparent; margin-bottom:-1px; display:flex; align-items:center; justify-content:center; gap:6px; }
+  .tab:hover { color:var(--text); }
+  .tab[aria-selected="true"] { color:var(--strong); border-bottom-color:var(--blurple); }
+  .pbody { flex:1; overflow-y:auto; padding:4px 16px 28px; overscroll-behavior:contain; }
+  .sec { margin:20px 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+
+  .item { display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; background:var(--bg1); margin-bottom:8px; }
+  .item .tx { flex:1; min-width:0; }
+  .item .nm { font-weight:600; color:var(--strong); overflow-wrap:anywhere; }
+  .item .sb { font-size:13px; color:var(--muted); }
+  .item.col { flex-direction:column; align-items:stretch; gap:12px; }
+  .item .top { display:flex; align-items:center; gap:12px; }
+  .actions { display:flex; gap:8px; }
+  .actions .btn { flex:1; }
+
+  .btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:36px; padding:0 14px;
+         border:0; border-radius:8px; font-weight:600; font-size:14px; background:var(--bg4); color:var(--strong);
+         transition:background .12s; white-space:nowrap; }
+  .btn:hover:not(:disabled) { background:#4a4d55; }
+  .btn.pri { background:var(--blurple); color:#fff; } .btn.pri:hover:not(:disabled) { background:var(--blurple-h); }
+  .btn.ok  { background:var(--green); color:#fff; }   .btn.ok:hover:not(:disabled)  { background:var(--green-h); }
+  .btn.bad { background:var(--red); color:#fff; }     .btn.bad:hover:not(:disabled) { background:var(--red-h); }
+  .btn.ghost { background:none; color:var(--muted); } .btn.ghost:hover:not(:disabled) { color:var(--strong); background:var(--bg3); }
+  .btn.lg { min-height:44px; width:100%; font-size:15px; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .spin { width:14px; height:14px; border-radius:50%; border:2px solid rgba(255,255,255,.35); border-top-color:#fff; animation:rot .8s linear infinite; }
+
+  .empty { text-align:center; padding:36px 16px; color:var(--muted); }
+  .empty .eic { width:64px; height:64px; border-radius:50%; background:var(--bg1); margin:0 auto 14px;
+                display:flex; align-items:center; justify-content:center; }
+  .empty .eic svg { width:30px; height:30px; }
+  .empty b { display:block; color:var(--strong); font-size:16px; margin-bottom:4px; }
+  .note { display:flex; gap:10px; background:rgba(240,178,50,.1); border:1px solid rgba(240,178,50,.35); color:#f5d78a;
+          border-radius:10px; padding:10px 12px; font-size:13px; margin:14px 0 0; }
+  .tile { background:var(--bg1); border-radius:12px; padding:16px; margin-bottom:12px; }
+  .tile h4 { margin:0 0 4px; font-size:16px; color:var(--strong); }
+  .tile p { margin:0 0 12px; font-size:13px; color:var(--muted); }
   .joinbox { display:flex; gap:8px; }
-  .joinbox input, .modal input { flex:1; min-width:0; background:var(--card); color:var(--fg); border:1px solid #333a44;
-         border-radius:8px; padding:10px 12px; font-size:18px; letter-spacing:.15em; text-transform:uppercase; user-select:text; }
-  .modal input { letter-spacing:normal; text-transform:none; font-size:16px; width:100%; margin:14px 0; }
-  .modal { position:fixed; inset:0; background:rgba(0,0,0,.7); display:flex; align-items:center; justify-content:center; z-index:20; padding:20px; }
-  .modal[hidden] { display:none; }
-  .modal .box { background:var(--card); border-radius:14px; padding:20px; width:100%; max-width:340px; }
-  .toast { position:fixed; left:50%; bottom:90px; transform:translateX(-50%); background:#333a44; color:var(--fg);
-           padding:10px 16px; border-radius:10px; font-size:14px; z-index:30; max-width:90%; text-align:center; }
-  .toast[hidden] { display:none; }
+  .field { flex:1; min-width:0; background:var(--bg0); color:var(--strong); border:1px solid transparent; border-radius:6px;
+           padding:10px 12px; font:inherit; font-size:16px; user-select:text; }
+  .field:focus { outline:none; border-color:var(--blurple); }
+  .codein { letter-spacing:.35em; text-transform:uppercase; font-weight:700; font-family:ui-monospace,Consolas,monospace; text-align:center; }
+  .room { display:flex; flex-direction:column; gap:12px; }
+  .room .rh { display:flex; align-items:center; gap:12px; }
+  .room .ric { width:44px; height:44px; border-radius:12px; background:var(--blurple); display:flex; align-items:center; justify-content:center; color:#fff; }
+  .room .code { font-family:ui-monospace,Consolas,monospace; font-size:22px; font-weight:700; letter-spacing:.2em; color:var(--strong); }
+  .room .mem { display:flex; align-items:center; gap:10px; font-size:13px; color:var(--muted); }
+
+  /* ---------- Ventana de nombre ---------- */
+  .modal { position:fixed; inset:0; z-index:40; display:flex; align-items:center; justify-content:center; padding:20px;
+           background:rgba(0,0,0,.7); animation:fade .15s ease-out; }
+  .mbox { width:100%; max-width:380px; background:var(--bg2); border-radius:14px; overflow:hidden; box-shadow:0 12px 40px rgba(0,0,0,.5); }
+  .mbody { padding:22px 20px 14px; text-align:center; }
+  .mbody h3 { margin:0 0 6px; font-size:20px; color:var(--strong); }
+  .mbody p { margin:0 0 18px; font-size:14px; color:var(--muted); }
+  .mbody label { display:block; text-align:left; font-size:12px; font-weight:700; text-transform:uppercase;
+                 letter-spacing:.04em; color:var(--muted); margin-bottom:8px; }
+  .mfoot { display:flex; justify-content:flex-end; gap:8px; padding:14px 16px; background:var(--bg1); }
+
+  /* ---------- Avisos ---------- */
+  .toast { position:fixed; left:50%; bottom:calc(84px + env(safe-area-inset-bottom)); transform:translateX(-50%); z-index:50;
+           background:var(--bg0); color:var(--strong); padding:12px 16px 12px 14px; border-radius:8px; font-size:14px; font-weight:500;
+           max-width:calc(100% - 32px); box-shadow:0 8px 24px rgba(0,0,0,.45); border-left:4px solid var(--blurple);
+           animation:pop .2s ease-out; }
+  .toast.ok { border-left-color:var(--green); } .toast.bad { border-left-color:var(--red); } .toast.warn { border-left-color:var(--yellow); }
+
+  @keyframes fade { from { opacity:0; } }
+  @keyframes up { from { transform:translateY(24px); opacity:0; } }
+  @keyframes pop { from { transform:translate(-50%, 8px); opacity:0; } }
+  @keyframes rot { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; } }
+
+  @media (min-width:720px) {
+    .sheet { align-items:center; }
+    .card { height:min(700px, 88vh); max-width:500px; border-radius:16px; box-shadow:0 16px 48px rgba(0,0,0,.55); overflow:hidden; }
+    .stage { justify-content:center; gap:48px; }
+    .toast { bottom:100px; }
+  }
+  @media (max-height:640px) {
+    .lamp { width:76px; height:76px; } .press { width:140px; height:140px; } .press svg { width:64px; height:64px; }
+    .hint { margin-top:16px; } .lamplabel { margin-top:10px; }
+  }
 </style>
 </head>
 <body>
-  <div class="top">
-    <div id="lamp" class="lamp"></div>
-    <div id="status" class="status">conectando…</div>
-  </div>
-  <div class="mid">
-    <button id="btn" class="btn" aria-label="Apretar">
-      <!-- mano con dedo apuntando (símbolo de "tocar") -->
-      <svg viewBox="0 0 24 24"><path d="M9 11V5a1.5 1.5 0 0 1 3 0v5.5l4.2.9a2 2 0 0 1 1.6 2.2l-.6 4.3a3 3 0 0 1-3 2.6H11a3 3 0 0 1-2.3-1.1L5.5 14.7a1.5 1.5 0 0 1 2.2-2L9 14"/></svg>
-    </button>
-  </div>
-  <div class="bottom">
-    <button id="open" class="conn">Conexión<span id="badge" class="badge" hidden></span></button>
-  </div>
+  <header class="appbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#5865f2"/><circle cx="10" cy="22" r="2.6" fill="#fff"/><path d="M10 14a8 8 0 0 1 8 8M10 8a14 14 0 0 1 14 14" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>
+      <span>Señal</span>
+    </div>
+    <button id="meChip" class="chip" aria-label="Tu perfil"><span id="meAv"></span><span id="meName" class="t"></span></button>
+  </header>
+
+  <main class="stage">
+    <button id="pill" class="pill" style="border:1px solid var(--line)"><span class="pd"></span><span id="statusText" class="t">Conectando…</span></button>
+    <div class="lampwrap">
+      <div id="lamp" class="lamp" role="img" aria-label="Indicador de señal"></div>
+      <div id="lampLabel" class="lamplabel" aria-live="polite">Esperando señal</div>
+    </div>
+    <div class="btnwrap">
+      <button id="btn" class="press" aria-label="Mantener apretado para enviar señal">
+        <!-- mano con dedo apuntando (símbolo de "tocar") -->
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11V5a1.5 1.5 0 0 1 3 0v5.5l4.2.9a2 2 0 0 1 1.6 2.2l-.6 4.3a3 3 0 0 1-3 2.6H11a3 3 0 0 1-2.3-1.1L5.5 14.7a1.5 1.5 0 0 1 2.2-2L9 14"/></svg>
+      </button>
+      <p class="hint">Mantené apretado para enviar</p>
+    </div>
+  </main>
+
+  <nav class="dock">
+    <button id="open" class="dockbtn" aria-haspopup="dialog"><span id="dockIc"></span>Conexión<span id="badge" class="badge" hidden></span></button>
+  </nav>
 
   <div id="sheet" class="sheet" hidden>
-    <div class="shead">
-      <div><h2>Conexión</h2><div id="me" class="me"></div></div>
-      <button id="close" class="x" aria-label="Cerrar">×</button>
-    </div>
-    <div class="tabs">
-      <button class="tab act" data-tab="people">Personas</button>
-      <button class="tab" data-tab="rooms">Salas</button>
-      <button class="tab" data-tab="req">Solicitudes<span id="tbadge" class="badge" hidden></span></button>
-    </div>
-    <div id="pbody" class="pbody"></div>
+    <section class="card" role="dialog" aria-modal="true" aria-label="Conexión">
+      <div class="shead">
+        <button id="close" class="iconbtn" aria-label="Volver"></button>
+        <h2>Conexión</h2>
+      </div>
+      <div id="profile" class="profile"></div>
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" data-tab="people">Personas</button>
+        <button class="tab" role="tab" data-tab="rooms">Salas</button>
+        <button class="tab" role="tab" data-tab="req">Solicitudes<span id="tbadge" class="badge" hidden></span></button>
+      </div>
+      <div id="pbody" class="pbody" role="tabpanel"></div>
+    </section>
   </div>
 
   <div id="modal" class="modal" hidden>
-    <div class="box">
-      <div>¿Cómo te llamás? Es lo que ven los demás.</div>
-      <input id="nameIn" maxlength="20" placeholder="Tu nombre" autocomplete="off">
-      <button id="nameOk" class="b">Guardar</button>
+    <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="mtitle">
+      <div class="mbody">
+        <h3 id="mtitle">Elegí tu nombre</h3>
+        <p>Es lo que van a ver las demás personas.</p>
+        <label for="nameIn">Nombre</label>
+        <input id="nameIn" class="field" maxlength="20" placeholder="Tu nombre" autocomplete="off">
+      </div>
+      <div class="mfoot">
+        <button id="nameCancel" class="btn ghost">Cancelar</button>
+        <button id="nameOk" class="btn pri">Guardar</button>
+      </div>
     </div>
   </div>
-  <div id="toast" class="toast" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
 
 <script>
   const $ = id => document.getElementById(id);
-  const lamp = $('lamp'), status = $('status'), btn = $('btn');
+  const lamp = $('lamp'), btn = $('btn');
   const store = {
     get: k => { try { return localStorage.getItem(k); } catch { return null; } },
     set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
   };
 
+  // ---------- Íconos (trazados fijos, nunca construidos con datos de otros dispositivos) ----------
+  const ICONS = {
+    people: 'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z',
+    check: 'M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
+    close: 'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
+    back: 'M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z',
+    edit: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z',
+    block: 'M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9A7.902 7.902 0 0 1 4 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1A7.902 7.902 0 0 1 20 12c0 4.42-3.58 8-8 8z',
+    plus: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z',
+    exit: 'M10.09 15.59 11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5a2 2 0 0 0-2 2v4h2V5h14v14H5v-4H3v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z',
+    room: 'M20 9V7h-4V3h-2v4h-4V3H8v4H4v2h4v4H4v2h4v4h2v-4h4v4h2v-4h4v-2h-4V9h4zm-6 4h-4V9h4v4z',
+    addUser: 'M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
+    bell: 'M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z',
+    warn: 'M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z',
+  };
+  function ic(name) {
+    const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('class', 'ic'); s.setAttribute('aria-hidden', 'true');
+    s.innerHTML = '<path d="' + ICONS[name] + '"/>';
+    return s;
+  }
+  $('dockIc').replaceWith(ic('people'));
+  $('close').append(ic('back'));
+
+  // ---------- Estado de la señal ----------
   let held = false, others = false, ws, vibTimer = null;
 
   // Un toque corto llega como "1" y "0" casi juntos: se mantiene lo recibido un mínimo para que se note.
@@ -154,6 +322,7 @@
 
   function render() {
     lamp.classList.toggle('on', held || others);
+    $('lampLabel').textContent = others ? 'Señal recibida' : held ? 'Enviando señal' : 'Esperando señal';
     if (!inApp) updateVib();
   }
 
@@ -163,9 +332,15 @@
 
   const tx = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
 
+  function setPill(kind, text) {
+    $('pill').className = 'pill ' + kind;
+    $('statusText').textContent = text;
+  }
+
   function connect() {
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/?d=' + deviceId);
     ws.onopen = () => {
+      setPill('ok', 'Conectado');
       if (name) tx({ t: 'name', n: name });
       if (held) ws.send('1');
     };
@@ -179,20 +354,21 @@
       } else if (o.t === 'ev') showEvent(o);
     };
     ws.onclose = () => {
-      st = null; status.textContent = 'reconectando…'; setOthers(false); renderPanel();
+      st = null; setPill('warn', 'Reconectando…'); setOthers(false); renderPanel();
       setTimeout(connect, 1000);
     };
   }
   connect();
 
   function renderStatus() {
-    const n = st.links.length + st.rooms.length;
-    status.textContent = n ? 'conectado · ' + st.links.length + (st.links.length === 1 ? ' persona' : ' personas')
-                             + (st.rooms.length ? ' · ' + st.rooms.length + (st.rooms.length === 1 ? ' sala' : ' salas') : '')
-                           : 'sin conexiones: tocá "Conexión"';
+    const link = st.links[0], room = st.rooms[0];
+    if (link) setPill('ok', 'Conectado con ' + link.n);
+    else if (room) setPill('ok', 'Sala ' + room.code + ' · ' + room.members.length + (room.members.length === 1 ? ' persona' : ' personas'));
+    else setPill('idle', 'Sin conexiones · tocá Conexión');
     const k = st.inbox.length;
     for (const b of [$('badge'), $('tbadge')]) { b.hidden = !k; b.textContent = k; }
   }
+  $('pill').onclick = () => openSheet('people');
 
   // ---------- Botón ----------
   function send(down) {
@@ -206,33 +382,14 @@
   ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => btn.addEventListener(t, () => send(false)));
   btn.addEventListener('contextmenu', e => e.preventDefault());
   addEventListener('keydown', e => {
-    if (e.code === 'Space' && !e.repeat && !/INPUT/.test(document.activeElement.tagName)) { e.preventDefault(); send(true); }
+    if (e.code === 'Space' && !e.repeat && !/INPUT|BUTTON/.test(document.activeElement.tagName)) { e.preventDefault(); send(true); }
   });
   addEventListener('keyup', e => { if (e.code === 'Space') send(false); });
   // Si la app pierde el foco con el botón apretado, no llega el "soltar": lo soltamos nosotros.
   addEventListener('blur', () => send(false));
   document.addEventListener('visibilitychange', () => { if (document.hidden) send(false); });
 
-  // ---------- Nombre ----------
-  function askName() {
-    $('nameIn').value = name;
-    $('modal').hidden = false;
-    $('nameIn').focus();
-  }
-  function saveName() {
-    const n = $('nameIn').value.trim().slice(0, 20);
-    if (!n) return;
-    name = n; store.set('name', n);
-    if (inApp && AndroidBridge.setName) AndroidBridge.setName(n);
-    $('modal').hidden = true;
-    tx({ t: 'name', n });
-  }
-  $('nameOk').onclick = saveName;
-  $('nameIn').addEventListener('keydown', e => { if (e.key === 'Enter') saveName(); });
-  if (!name) askName();
-  else if (inApp && AndroidBridge.setName) AndroidBridge.setName(name);   // que el servicio lo conozca
-
-  // ---------- Panel de conexión ----------
+  // ---------- Construcción de elementos ----------
   // Los nombres vienen de otros dispositivos: siempre se insertan como texto, nunca como HTML.
   function el(tag, attrs, ...kids) {
     const e = document.createElement(tag);
@@ -244,108 +401,173 @@
     for (const c of kids.flat()) if (c != null) e.append(c);
     return e;
   }
+  const AV_COLORS = ['#5865f2', '#747f8d', '#3ba55c', '#faa61a', '#ed4245', '#eb459e'];
+  const hash = s => [...s].reduce((h, c) => (h * 31 + c.codePointAt(0)) >>> 0, 7);
+  function avatar(n, size = 40, online, ring) {
+    const a = el('span', { class: 'av', style: '--s:' + size + 'px;background:' + AV_COLORS[hash(n) % AV_COLORS.length] + (ring ? ';--ring:' + ring : '') },
+                 ([...n.trim()][0] || '?'));
+    if (online !== undefined) a.append(el('span', { class: 'st' + (online ? ' on' : '') }));
+    return a;
+  }
+  function button(cls, label, icon, onclick) {
+    return el('button', { class: 'btn ' + cls, onclick }, icon ? ic(icon) : null, label);
+  }
   const secs = end => Math.max(0, Math.ceil((end - Date.now()) / 1000)) + ' s';
-  const countdown = s => el('span', { 'data-end': s.end }, secs(s.end));
-  const row = (main, ...acts) => el('div', { class: 'row' }, main, el('div', { class: 'acts' }, acts));
-  const who = (n, sub, online) => el('div', { class: 'nm' },
-    online === undefined ? null : el('span', { class: 'dot' + (online ? ' on' : '') }), n,
-    sub ? el('div', { class: 'sub' }, sub) : null);
+  const waiting = s => el('button', { class: 'btn pri', disabled: '' }, el('span', { class: 'spin' }),
+                          'Conectando… ', el('span', { 'data-end': s.end }, secs(s.end)));
+  const section = (title, count) => el('div', { class: 'sec' }, count == null ? title : title + ' — ' + count);
+  const empty = (icon, title, hint) => el('div', { class: 'empty' },
+    el('div', { class: 'eic' }, ic(icon)), el('b', {}, title), hint);
+  const note = text => el('div', { class: 'note' }, ic('warn'), el('span', {}, text));
+  const item = (av, nm, sb, ...right) => el('div', { class: 'item' }, av,
+    el('div', { class: 'tx' }, el('div', { class: 'nm' }, nm), sb ? el('div', { class: 'sb' }, sb) : null), ...right);
 
+  // ---------- Perfil y nombre ----------
+  function renderMe() {
+    $('meAv').replaceChildren(avatar(name || '?', 28));
+    $('meName').textContent = name || 'Sin nombre';
+    $('profile').replaceChildren(avatar(name || '?', 56, true, 'var(--bg1)'),
+      el('div', { class: 'pt' }, el('div', { class: 'pn' }, name || 'Sin nombre'), el('div', { class: 'ps' }, 'En línea')),
+      button('', 'Editar', 'edit', askName));
+  }
+  function askName() {
+    $('nameIn').value = name;
+    $('nameCancel').hidden = !name;   // la primera vez el nombre es obligatorio
+    $('modal').hidden = false;
+    $('nameIn').focus();
+  }
+  function saveName() {
+    const n = $('nameIn').value.trim().slice(0, 20);
+    if (!n) { $('nameIn').focus(); return; }
+    name = n; store.set('name', n);
+    if (inApp && AndroidBridge.setName) AndroidBridge.setName(n);
+    $('modal').hidden = true;
+    tx({ t: 'name', n });
+    renderMe();
+  }
+  $('nameOk').onclick = saveName;
+  $('nameCancel').onclick = () => { $('modal').hidden = true; };
+  $('nameIn').addEventListener('keydown', e => { if (e.key === 'Enter') saveName(); });
+  $('meChip').onclick = askName;
+  renderMe();
+  if (!name) askName();
+  else if (inApp && AndroidBridge.setName) AndroidBridge.setName(name);   // que el servicio lo conozca
+
+  // ---------- Panel de conexión ----------
   let tab = 'people', joinCode = '';
 
   function peopleView() {
     const out = [];
-    if (st.busy) out.push(el('div', { class: 'note' }, 'Ya estás conectado. Para conectarte con otra persona, primero desconectate o salí de tu sala.'));
-    out.push(el('h3', {}, 'Conectados ahora'));
-    if (!st.online.length) out.push(el('div', { class: 'empty' }, 'No hay nadie más conectado. Abrí la app en otro dispositivo.'));
+    if (st.busy) out.push(note('Ya estás conectado. Para conectarte con otra persona, primero desconectate o salí de tu sala.'));
+    out.push(section('Conectados ahora', st.online.length));
+    if (!st.online.length) out.push(empty('people', 'No hay nadie más conectado', 'Abrí la app en otro dispositivo para verlo acá.'));
     for (const p of st.online) {
       const s = st.sent.find(x => x.kind === 'link' && x.to === p.d);
-      out.push(row(who(p.n, null, true),
-        p.linked ? el('span', { class: 'sub' }, 'Conectado ✓')
-        : s ? el('button', { class: 'b', disabled: '' }, 'Conectando… ', countdown(s))
-        : p.busy ? el('span', { class: 'sub' }, 'Ocupado')
-        : st.busy ? el('button', { class: 'b', disabled: '' }, 'Conectar')
-        : el('button', { class: 'b', onclick: () => tx({ t: 'link', to: p.d }) }, 'Conectar')));
+      out.push(item(avatar(p.n, 40, true), p.n, p.linked ? 'Conectado con vos' : p.busy ? 'Ocupado en otra conexión' : 'En línea',
+        p.linked ? el('span', { class: 'sb' }, ic('check'))
+        : s ? waiting(s)
+        : p.busy ? null
+        : st.busy ? el('button', { class: 'btn pri', disabled: '' }, 'Conectar')
+        : button('pri', 'Conectar', 'addUser', () => tx({ t: 'link', to: p.d }))));
     }
-    out.push(el('h3', {}, 'Mis conexiones'));
-    if (!st.links.length) out.push(el('div', { class: 'empty' }, 'Todavía no estás conectado con nadie.'));
+    out.push(section('Mis conexiones', st.links.length));
+    if (!st.links.length) out.push(empty('addUser', 'Todavía no estás conectado con nadie', 'Elegí a alguien de la lista y tocá Conectar.'));
     for (const l of st.links)
-      out.push(row(who(l.n, l.online ? 'en línea' : 'sin conexión', l.online),
-        el('button', { class: 'b bad', onclick: () => tx({ t: 'unlink', d: l.d }) }, 'Desconectar')));
+      out.push(item(avatar(l.n, 40, l.online), l.n, l.online ? 'En línea' : 'Sin conexión',
+        button('bad', 'Desconectar', null, () => tx({ t: 'unlink', d: l.d }))));
     return out;
   }
 
   function roomsView() {
     const out = [];
-    if (st.busy) {
-      out.push(el('div', { class: 'note' }, 'Ya estás conectado. Para crear una sala o unirte a otra, primero desconectate o salí de tu sala actual.'));
+    if (st.busy && !st.rooms.length) {
+      out.push(note('Ya estás conectado con una persona. Para crear una sala o unirte a otra, primero desconectate.'));
+    } else if (st.busy) {
+      out.push(note('Ya estás en una sala. Para crear otra o unirte a otra, primero salí de esta.'));
     } else {
-      out.push(el('h3', {}, 'Crear una sala'),
-        el('button', { class: 'b', onclick: () => tx({ t: 'create' }) }, 'Crear sala'),
-        el('h3', {}, 'Unirse a una sala'),
+      out.push(el('div', { class: 'tile' }, el('h4', {}, 'Crear una sala'),
+        el('p', {}, 'Obtenés un código para compartir. Vos decidís quién entra.'),
+        button('pri lg', 'Crear sala', 'plus', () => tx({ t: 'create' }))));
+      out.push(el('div', { class: 'tile' }, el('h4', {}, 'Unirse a una sala'),
+        el('p', {}, 'Escribí el código de 4 letras. El anfitrión tiene que aceptarte.'),
         el('div', { class: 'joinbox' },
-          el('input', { id: 'joincode', maxlength: '4', placeholder: 'CÓDIGO', autocomplete: 'off',
-                        oninput: e => { joinCode = e.target.value.toUpperCase(); } }),
-          el('button', { class: 'b', onclick: () => { if (joinCode.length === 4) tx({ t: 'join', code: joinCode }); } }, 'Unirme')));
+          el('input', { id: 'joincode', class: 'field codein', maxlength: '4', placeholder: 'ABCD', autocomplete: 'off',
+                        'aria-label': 'Código de sala', oninput: e => { joinCode = e.target.value.toUpperCase(); } }),
+          button('pri', 'Unirme', null, () => { if (joinCode.length === 4) tx({ t: 'join', code: joinCode }); }))));
     }
     for (const s of st.sent.filter(x => x.kind === 'join'))
-      out.push(row(who('Sala ' + s.code, 'Esperando que te acepten'), el('button', { class: 'b', disabled: '' }, 'Conectando… ', countdown(s))));
-    out.push(el('h3', {}, 'Mis salas'));
-    if (!st.rooms.length) out.push(el('div', { class: 'empty' }, 'No estás en ninguna sala.'));
+      out.push(item(el('span', { class: 'av', style: '--s:40px;background:var(--blurple)' }, ic('room')),
+        'Sala ' + s.code, 'Esperando que te acepten', waiting(s)));
+    out.push(section('Mi sala', st.rooms.length));
+    if (!st.rooms.length) out.push(empty('room', 'No estás en ninguna sala', 'Creá una o unite con un código.'));
     for (const r of st.rooms)
-      out.push(el('div', { class: 'row' },
-        el('div', { class: 'nm' },
-          el('div', { class: 'code' }, r.code),
-          el('div', { class: 'sub' }, (r.host ? 'Sos el anfitrión' : 'Anfitrión: ' + r.hostName)),
-          el('div', { class: 'sub' }, r.members.map(m => m.n + (m.me ? ' (vos)' : '') + (m.online ? '' : ' · sin conexión')).join(', '))),
-        el('button', { class: 'b bad', onclick: () => tx({ t: 'leave', code: r.code }) }, r.host ? 'Cerrar' : 'Salir')));
+      out.push(el('div', { class: 'item col' },
+        el('div', { class: 'rh' }, el('div', { class: 'ric' }, ic('room')),
+          el('div', { class: 'tx' }, el('div', { class: 'code' }, r.code),
+            el('div', { class: 'sb' }, r.host ? 'Sos el anfitrión' : 'Anfitrión: ' + r.hostName))),
+        el('div', { class: 'mem' }, el('div', { class: 'stack' }, r.members.map(m => avatar(m.n, 32))),
+          el('span', {}, r.members.map(m => m.n + (m.me ? ' (vos)' : '')).join(', '))),
+        button('bad lg', r.host ? 'Cerrar sala' : 'Salir de la sala', 'exit', () => tx({ t: 'leave', code: r.code }))));
     return out;
   }
 
   function reqView() {
-    if (!st.inbox.length) return [el('div', { class: 'empty' }, 'No tenés solicitudes.')];
-    return st.inbox.map(r => row(
-      who(r.from, r.kind === 'join' ? 'quiere unirse a tu sala ' + r.code : 'quiere conectarse con vos'),
-      el('button', { class: 'b', onclick: () => tx({ t: 'answer', id: r.id, ok: true }) }, 'Aceptar'),
-      el('button', { class: 'b bad', onclick: () => tx({ t: 'answer', id: r.id, ok: false }) }, 'Rechazar'),
-      el('button', { class: 'b sec', onclick: () => tx({ t: 'ignore', id: r.id }) }, 'Ignorar')));
+    if (!st.inbox.length) return [empty('bell', 'No tenés solicitudes', 'Cuando alguien quiera conectarse con vos, va a aparecer acá.')];
+    return [section('Pendientes', st.inbox.length), ...st.inbox.map(r => el('div', { class: 'item col' },
+      el('div', { class: 'top' }, avatar(r.from, 40),
+        el('div', { class: 'tx' }, el('div', { class: 'nm' }, r.from),
+          el('div', { class: 'sb' }, r.kind === 'join' ? 'Quiere unirse a tu sala ' + r.code : 'Quiere conectarse con vos'))),
+      el('div', { class: 'actions' },
+        button('ok', 'Aceptar', 'check', () => tx({ t: 'answer', id: r.id, ok: true })),
+        button('bad', 'Rechazar', 'close', () => tx({ t: 'answer', id: r.id, ok: false })),
+        button('', 'Ignorar', 'block', () => tx({ t: 'ignore', id: r.id })))))];
   }
 
   function renderPanel() {
     if ($('sheet').hidden) return;
-    $('me').textContent = name ? 'Vos: ' + name + ' ✎' : '';
-    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('act', t.dataset.tab === tab));
+    document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.tab === tab));
     const body = $('pbody');
-    if (!st) { body.replaceChildren(el('div', { class: 'empty' }, 'Sin conexión con el servidor…')); return; }
+    if (!st) { body.replaceChildren(empty('warn', 'Sin conexión con el servidor', 'Reintentando…')); return; }
     const typing = document.activeElement && document.activeElement.id === 'joincode';
     body.replaceChildren(...{ people: peopleView, rooms: roomsView, req: reqView }[tab]());
     const inp = $('joincode');
     if (inp) { inp.value = joinCode; if (typing) inp.focus(); }
   }
 
+  function openSheet(t) {
+    if (t) tab = t;
+    $('sheet').hidden = false;
+    renderMe(); renderPanel();
+  }
+  const closeSheet = () => { $('sheet').hidden = true; };
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => { tab = t.dataset.tab; renderPanel(); });
-  $('open').onclick = () => { $('sheet').hidden = false; renderPanel(); };
-  $('close').onclick = () => { $('sheet').hidden = true; };
-  $('me').onclick = askName;
+  $('open').onclick = () => openSheet();
+  $('close').onclick = closeSheet;
+  $('sheet').addEventListener('click', e => { if (e.target === $('sheet')) closeSheet(); });
+  addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!$('modal').hidden) { if (name) $('modal').hidden = true; } else closeSheet();
+  });
   // Cuenta regresiva de las solicitudes enviadas, sin rehacer el panel (así no se pierde lo que se escribe).
   setInterval(() => document.querySelectorAll('[data-end]').forEach(e => { e.textContent = secs(+e.dataset.end); }), 500);
 
   let toastTimer;
-  function toast(msg) {
+  function toast(msg, kind) {
     const t = $('toast');
-    t.textContent = msg; t.hidden = false;
+    t.textContent = msg; t.className = 'toast ' + (kind || ''); t.hidden = false;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { t.hidden = true; }, 4000);
   }
   function showEvent(o) {
     const sala = o.kind === 'join' ? ' (sala ' + o.code + ')' : '';
-    toast({
-      accepted: o.who + ' aceptó tu solicitud' + sala,
-      rejected: o.who + ' rechazó tu solicitud' + sala,
-      expired: o.who + ' no respondió' + sala,
-      busy: 'No se pudo conectar con ' + o.who + ': ya está conectado con otro',
-      error: o.msg,
-    }[o.k] || '');
+    const [msg, kind] = {
+      accepted: [o.who + ' aceptó tu solicitud' + sala, 'ok'],
+      rejected: [o.who + ' rechazó tu solicitud' + sala, 'bad'],
+      expired: [o.who + ' no respondió' + sala, 'warn'],
+      busy: ['No se pudo conectar con ' + o.who + ': ya está conectado con otro', 'warn'],
+      error: [o.msg, 'bad'],
+    }[o.k] || ['', ''];
+    if (msg) toast(msg, kind);
   }
 </script>
 </body>
