@@ -39,7 +39,7 @@ import okhttp3.WebSocketListener;
  * de OkHttp cada 30 s), reconexión con espera creciente y reintento inmediato al volver la red.
  */
 public class SignalService extends Service {
-    static final String DEFAULT_URL = "http://192.168.1.16:3000";
+    static final String DEFAULT_URL = "https://morse.gaelcloud.org";
     static final String ACTION_STOP = "com.morse.senal.STOP";
     static final String ACTION_RECONNECT = "com.morse.senal.RECONNECT";
 

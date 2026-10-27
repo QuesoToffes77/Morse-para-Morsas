@@ -16,11 +16,19 @@ const PORT = process.env.PORT || 3000;
 const REQUEST_MS = Number(process.env.REQUEST_MS) || 20000;   // cuánto espera una solicitud
 // Código de acceso compartido (sin cuentas): si está definido, solo entran dispositivos que lo conozcan.
 const ACCESS_CODE = process.env.ACCESS_CODE || '';
-const TRUST_PROXY = process.env.TRUST_PROXY === '1';          // detrás de un proxy inverso (NAS): usar X-Forwarded-For
+// Dónde escucha. Por defecto en toda la red. Detrás de un túnel (cloudflared) conviene HOST=127.0.0.1: así el
+// servidor solo es alcanzable por el túnel y no hay ningún puerto abierto hacia la red.
+const HOST = process.env.HOST || '0.0.0.0';
+// Detrás de un proxy / túnel (cloudflared): la dirección real del visitante viene en un encabezado, no en el socket.
+const TRUST_PROXY = process.env.TRUST_PROXY === '1';
 const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS) || 24 * 3600 * 1000;   // una sala sin nadie en línea se borra después de esto
 const SWEEP_MS = Number(process.env.SWEEP_MS) || 60000;
 const DATA = process.env.DATA_FILE || path.join(__dirname, 'data.json');
-const html = () => fs.readFileSync(path.join(__dirname, 'index.html'));
+// La página y los archivos estáticos se leen del disco una sola vez (al primer pedido) y quedan en memoria.
+// Si editás index.html o public/, reiniciá el servidor.
+const memo = new Map();
+const cached = file => { let b = memo.get(file); if (!b) memo.set(file, b = fs.readFileSync(file)); return b; };
+const html = () => cached(path.join(__dirname, 'index.html'));
 
 // ---------- Datos que sobreviven a un reinicio: nombres, conexiones y salas ----------
 // names y rooms se indexan con texto que manda el cliente (ids, códigos): por eso son objetos SIN prototipo.
@@ -46,7 +54,15 @@ const key = (a, b) => [a, b].sort().join('|');
 const isLinked = (a, b) => db.links.includes(key(a, b));
 // El id de dispositivo (?d=) es SECRETO: quien lo conoce puede hacerse pasar por ese dispositivo. A los demás
 // nunca se les muestra; ven un identificador público derivado con un hash, que no permite recuperar el original.
-const pub = d => crypto.createHash('sha256').update(d).digest('hex').slice(0, 12);
+const pubCache = new Map();
+const pub = d => {
+  let p = pubCache.get(d);
+  if (!p) {
+    if (pubCache.size > 10000) pubCache.clear();
+    pubCache.set(d, p = crypto.createHash('sha256').update(d).digest('hex').slice(0, 12));
+  }
+  return p;
+};
 const nameOf = d => db.names[d] || 'Dispositivo ' + pub(d).slice(0, 4);
 // Sin caracteres de control ni de dirección de texto (que podrían disfrazar o desordenar el nombre).
 const cleanName = n => String(n == null ? '' : n)
@@ -88,7 +104,7 @@ function staticFile(url) {
 const server = http.createServer((req, res) => {
   try {
     const s = staticFile(req.url);
-    if (s) return res.writeHead(200, { 'Content-Type': s.type, 'Cache-Control': 'public, max-age=3600' }).end(fs.readFileSync(s.file));
+    if (s) return res.writeHead(200, { 'Content-Type': s.type, 'Cache-Control': 'public, max-age=3600' }).end(cached(s.file));
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(html());
   } catch (e) {   // un pedido raro nunca debe tumbar el servidor
     console.error('Error HTTP:', e.message);
@@ -108,8 +124,14 @@ const wss = new WebSocketServer({ server, maxPayload: 4096, verifyClient: sameOr
 wss.on('error', () => {}); // ws reenvía los errores del server; los maneja server.on('error') más abajo
 
 const open = c => c.readyState === 1;
-const socketsOf = dev => [...wss.clients].filter(c => c.dev === dev && open(c));
-const onlineDevs = () => new Set([...wss.clients].filter(c => open(c) && c.dev).map(c => c.dev));
+// Índice dispositivo -> sockets (página y/o servicio), para no recorrer todos los clientes en cada consulta.
+const conns = new Map();
+const socketsOf = dev => { const s = conns.get(dev); return s ? [...s].filter(open) : []; };
+const onlineDevs = () => {
+  const on = new Set();
+  for (const [d, s] of conns) for (const c of s) if (open(c)) { on.add(d); break; }
+  return on;
+};
 /** Dispositivo (id secreto) que corresponde a un identificador público, entre los `pool` dados. */
 const devByPub = (h, pool) => { for (const d of pool) if (pub(d) === h) return d; return null; };
 
@@ -124,7 +146,17 @@ function rate(kind, k, max, ms) {
 }
 setInterval(() => { const now = Date.now(); for (const [k, h] of hits) if (h[1] <= now) hits.delete(k); }, 30000).unref();
 
-const clientIp = req => (TRUST_PROXY && String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || '?';
+// Con TRUST_PROXY=1 se usa CF-Connecting-IP (lo pone Cloudflare y el visitante no puede falsificarlo) o, si no hay,
+// la ÚLTIMA dirección de X-Forwarded-For (la que agregó el proxy; las anteriores las puede escribir cualquiera).
+const clientIp = req => {
+  if (TRUST_PROXY) {
+    const cf = String(req.headers['cf-connecting-ip'] || '').trim();
+    if (cf) return cf;
+    const xff = String(req.headers['x-forwarded-for'] || '').split(',').map(x => x.trim()).filter(Boolean);
+    if (xff.length) return xff[xff.length - 1];
+  }
+  return req.socket.remoteAddress || '?';
+};
 const sameCode = k => {   // comparación de tiempo constante
   const h = s => crypto.createHash('sha256').update(String(s)).digest();
   return crypto.timingSafeEqual(h(k), h(ACCESS_CODE));
@@ -196,19 +228,19 @@ function notify() {
 const pending = new Map();   // id -> { id, kind: 'link'|'join', from, to, code, ignored, timer }
 const newId = () => crypto.randomBytes(6).toString('hex');
 
-function stateFor(dev) {
+function stateFor(dev, online = onlineDevs()) {
   const nb = neighbors(dev);
   const reqs = [...pending.values()];
   return {
     t: 'state',
     me: { d: pub(dev), n: nameOf(dev) },
     busy: busy(dev),
-    online: [...onlineDevs()].filter(d => d !== dev).map(d => ({ d: pub(d), n: nameOf(d), linked: nb.has(d), busy: busy(d) })),
+    online: [...online].filter(d => d !== dev).map(d => ({ d: pub(d), n: nameOf(d), linked: nb.has(d), busy: busy(d) })),
     links: db.links.map(k => k.split('|')).filter(p => p.includes(dev)).map(p => p.find(d => d !== dev))
-      .map(d => ({ d: pub(d), n: nameOf(d), online: onlineDevs().has(d) })),
+      .map(d => ({ d: pub(d), n: nameOf(d), online: online.has(d) })),
     rooms: Object.entries(db.rooms).filter(([, r]) => r.members.includes(dev)).map(([code, r]) => ({
       code, host: r.host === dev, hostName: nameOf(r.host),
-      members: r.members.map(m => ({ d: pub(m), n: nameOf(m), me: m === dev, online: onlineDevs().has(m) })),
+      members: r.members.map(m => ({ d: pub(m), n: nameOf(m), me: m === dev, online: online.has(m) })),
     })),
     floor: floorInfo(groupOf(dev)),
     inbox: reqs.filter(r => r.to === dev && !r.ignored).map(r => ({ id: r.id, kind: r.kind, code: r.code, from: nameOf(r.from) })),
@@ -218,13 +250,19 @@ function stateFor(dev) {
   };
 }
 
-function broadcastState() {
-  const cache = new Map();
+function _broadcastState() {
+  const cache = new Map(), online = onlineDevs();
   for (const c of wss.clients) {
-    if (c.svc || !open(c)) continue;   // el servicio en segundo plano no necesita el estado completo
-    if (!cache.has(c.dev)) cache.set(c.dev, JSON.stringify(stateFor(c.dev)));
+    if (c.svc || !open(c) || !c.dev) continue;   // el servicio en segundo plano no necesita el estado completo
+    if (!cache.has(c.dev)) cache.set(c.dev, JSON.stringify(stateFor(c.dev, online)));
     c.send(cache.get(c.dev));
   }
+}
+// Varios cambios seguidos (alguien se conecta, otro suelta...) mandan UN solo estado a todos, 50 ms después.
+let _bsT = null;
+function broadcastState() {
+  if (_bsT) return;
+  _bsT = setTimeout(() => { _bsT = null; _broadcastState(); }, 50);
 }
 
 const sendDev = (dev, obj, pageOnly) => {
@@ -389,6 +427,8 @@ wss.on('connection', (ws, req) => {
   ws.dev = d && /^[\w-]{1,64}$/.test(d) ? d : crypto.randomBytes(16).toString('hex');
   if (socketsOf(ws.dev).length >= 8) { ws.dev = null; return ws.close(CLOSE_BUSY, 'demasiadas conexiones de este dispositivo'); }
   ws.id = ++socketSeq;
+  if (!conns.has(ws.dev)) conns.set(ws.dev, new Set());
+  conns.get(ws.dev).add(ws);
   ws.svc = q.get('s') === '1';   // servicio en segundo plano de la app
   ws.last = null;
   ws.alive = true;
@@ -410,6 +450,8 @@ wss.on('connection', (ws, req) => {
     }
   });
   ws.on('close', () => {
+    const mine = conns.get(ws.dev);
+    if (mine) { mine.delete(ws); if (!mine.size) conns.delete(ws.dev); }
     release(ws);   // si tenía la palabra, la suelta (con la misma espera de siempre)
     if (!socketsOf(ws.dev).length) {   // el dispositivo se fue del todo (ni página ni servicio)
       for (const r of [...pending.values()]) {
@@ -444,15 +486,18 @@ server.on('error', err => {
   });
 });
 
-function start() { server.listen(PORT, '0.0.0.0', onListen); }
+function start() { server.listen(PORT, HOST, onListen); }
 start();
 
 function onListen() {
   console.log(ACCESS_CODE ? 'Código de acceso: activado (cada dispositivo lo escribe una vez).'
     : 'Sin código de acceso: cualquiera que llegue al servidor puede entrar. Definí ACCESS_CODE para protegerlo.');
-  console.log('Abrí en cualquier dispositivo de la red:');
-  for (const list of Object.values(os.networkInterfaces()))
-    for (const i of list)
-      if (i.family === 'IPv4' && !i.internal) console.log(`  http://${i.address}:${PORT}`);
+  const local = HOST === '127.0.0.1' || HOST === 'localhost' || HOST === '::1';
+  console.log(local ? `Escuchando solo en ${HOST} (sin puertos abiertos a la red; se accede por el túnel):`
+                    : 'Abrí en cualquier dispositivo de la red:');
+  if (!local)
+    for (const list of Object.values(os.networkInterfaces()))
+      for (const i of list)
+        if (i.family === 'IPv4' && !i.internal) console.log(`  http://${i.address}:${PORT}`);
   console.log(`  http://localhost:${PORT}`);
 }

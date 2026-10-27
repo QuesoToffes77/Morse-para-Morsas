@@ -33,6 +33,7 @@ class Client {
     this.signals = [];   // "1"/"0" recibidos
     this.events = [];    // {t:'ev'} (aceptada, rechazada, error...)
     this.reqs = [];      // {t:'req'} (aviso de solicitud entrante)
+    this.stateCount = 0; // cuántos {t:'state'} llegaron
     this.floors = [];    // {t:'floor'}: quién tiene la palabra
     this.denies = [];    // {t:'deny'}: apretó pero habla otra persona
     this.st = null;      // último {t:'state'}
@@ -42,7 +43,7 @@ class Client {
       m = String(m);
       if (m[0] !== '{') return this.signals.push(m);
       const o = JSON.parse(m);
-      if (o.t === 'state') this.st = o; else if (o.t === 'ev') this.events.push(o); else if (o.t === 'req') this.reqs.push(o);
+      if (o.t === 'state') { this.st = o; this.stateCount++; } else if (o.t === 'ev') this.events.push(o); else if (o.t === 'req') this.reqs.push(o);
       else if (o.t === 'floor') this.floors.push(o); else if (o.t === 'deny') this.denies.push(o);
     });
     this.ws.on('close', c => { this.closed = true; this.closeCode = c; });
@@ -159,6 +160,7 @@ test('aceptar crea la conexión en los dos lados y avisa a quien la mandó', wit
   assert.equal(a.st.sent[0].toName, 'Beto');
   b.tx({ t: 'answer', id: b.st.inbox[0].id, ok: true });
   await waitFor(() => a.event('accepted'));
+  await waitFor(() => a.st.links.length && b.st.links.length && !a.st.sent.length && !b.st.inbox.length, 2500, 'el estado actualizado');
   assert.equal(a.st.links[0].n, 'Beto');
   assert.equal(b.st.links[0].n, 'Ana');
   assert.equal(a.st.sent.length + b.st.inbox.length, 0);
@@ -182,7 +184,7 @@ test('ignorar la saca de la bandeja, y a quien la mandó le vence', withServer(a
   await waitFor(() => b.st.inbox.length === 0);
   assert.equal(a.st.sent.length, 1, 'para A sigue pendiente');
   await waitFor(() => a.event('expired'), 3000, 'que venza');
-  assert.equal(a.st.sent.length, 0);
+  await waitFor(() => a.st.sent.length === 0, 2500, 'que se vacíe lo enviado');
 }));
 
 test('sin respuesta, la solicitud vence', withServer(async srv => {
@@ -199,6 +201,7 @@ test('no se puede mandar dos solicitudes iguales ni a uno mismo ni a alguien des
   assert.match(a.event('error').msg, /pendiente/);
   a.tx({ t: 'link', to: pub('aaaa') }); a.tx({ t: 'link', to: 'nadie' });
   await waitFor(() => a.events.filter(e => e.k === 'error').length === 3);
+  await sleep(120);   // el estado llega agrupado, poco después de los eventos
   assert.equal(a.st.sent.length, 1);
 }));
 
@@ -288,10 +291,11 @@ test('sala: rechazar, código inexistente, y salir', withServer(async srv => {
   await waitFor(() => host.st.inbox.length);
   host.tx({ t: 'answer', id: host.st.inbox[0].id, ok: false });
   await waitFor(() => m.event('rejected'));
+  await waitFor(() => host.st.inbox.length === 0 && m.st.sent.length === 0, 2500, 'que se limpie la solicitud rechazada');
   assert.equal(m.st.rooms.length, 0);
   // ahora sí entra, y sale
   m.tx({ t: 'join', code });
-  await waitFor(() => host.st.inbox.length);
+  await waitFor(() => host.st.inbox.length === 1);
   host.tx({ t: 'answer', id: host.st.inbox[0].id, ok: true });
   await waitFor(() => m.st.rooms.length);
   m.tx({ t: 'leave', code });
@@ -380,7 +384,7 @@ test('si el destinatario se desconecta, quien esperaba se entera enseguida', wit
   await waitFor(() => b.st.inbox.length === 1);
   await b.close();
   await waitFor(() => a.event('offline'), 400, 'el aviso de desconexión (antes de que venza)');
-  assert.equal(a.st.sent.length, 0);
+  await waitFor(() => a.st.sent.length === 0, 400, 'que se vacíe lo enviado (antes de que venza)');
 }), { requestMs: 5000 });
 
 test('si el anfitrión se desconecta, la sala sigue pero nadie puede pedir entrar', withServer(async srv => {
@@ -706,3 +710,52 @@ test('sin conexión no hay turnos: apretar nunca es rechazado', withServer(async
   a.press(); b.press(); await sleep(150);
   assert.equal(a.denies.length + b.denies.length, 0);
 }, FLOOR));
+
+// ---------------------------------------------------------------- rendimiento
+
+test('muchos cambios seguidos mandan pocos estados (se agrupan), y el resultado final es correcto', withServer(async srv => {
+  const a = await srv.client('aaaaaaaa').ready();
+  const before = a.stateCount;
+  const many = Array.from({ length: 12 }, (_, i) => srv.client('dev-' + String(i).padStart(7, '0'), { name: 'P' + i }));
+  await Promise.all(many.map(c => c.opened));
+  await waitFor(() => a.st.online.length === 12 && a.st.online.every(o => /^P\d+$/.test(o.n)), 2500, 'que A vea a las 12 personas');
+  assert.ok(a.stateCount - before < 12, 'se mandaron ' + (a.stateCount - before) + ' estados para 12 conexiones y 12 nombres');
+}));
+
+test('la página se sirve igual en pedidos repetidos (queda en memoria)', withServer(async srv => {
+  const x = await httpGet(srv, '/'), y = await httpGet(srv, '/');
+  assert.deepEqual(x.body, y.body);
+  assert.equal(x.body.toString(), fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'));
+}));
+
+// ---------------------------------------------------------------- detrás de cloudflared
+
+test('con HOST=127.0.0.1 el servidor solo escucha en la propia máquina', withServer(async srv => {
+  assert.match(srv.log(), /Escuchando solo en 127\.0\.0\.1/);
+  const r = await httpGet(srv, '/');
+  assert.equal(r.status, 200);
+  const external = Object.values(os.networkInterfaces()).flat().find(i => i.family === 'IPv4' && !i.internal);
+  if (!external) return;   // sin otra interfaz de red no hay nada que comprobar
+  await assert.rejects(() => new Promise((resolve, reject) => {
+    http.get({ host: external.address, port: srv.port, path: '/', timeout: 1500 }, resolve).on('error', reject).on('timeout', function () { this.destroy(new Error('timeout')); });
+  }), 'no debería aceptar conexiones por la dirección de la red');
+}, { env: { HOST: '127.0.0.1' } }));
+
+test('con TRUST_PROXY=1 los intentos de código se cuentan por la IP real (CF-Connecting-IP), no por el túnel', withServer(async srv => {
+  const tryFrom = ip => new Promise(resolve => {
+    const ws = new WebSocket(`ws://127.0.0.1:${srv.port}/?d=xxxxxxxx&k=mala`, { headers: { 'CF-Connecting-IP': ip } });
+    ws.on('close', code => resolve(code)); ws.on('error', () => {});
+  });
+  for (let i = 0; i < 5; i++) assert.equal(await tryFrom('203.0.113.7'), 4001);
+  assert.equal(await tryFrom('203.0.113.7'), 4029, 'esa IP queda bloqueada');
+  assert.equal(await tryFrom('198.51.100.9'), 4001, 'otra IP no se ve afectada');
+}, { env: { ACCESS_CODE: 'clave', TRUST_PROXY: '1' } }));
+
+test('con TRUST_PROXY=1, un X-Forwarded-For falso no sirve para evadir el bloqueo', withServer(async srv => {
+  const tryWith = fake => new Promise(resolve => {
+    const ws = new WebSocket(`ws://127.0.0.1:${srv.port}/?d=xxxxxxxx&k=mala`, { headers: { 'X-Forwarded-For': fake + ', 203.0.113.50' } });
+    ws.on('close', code => resolve(code)); ws.on('error', () => {});
+  });
+  for (let i = 0; i < 5; i++) assert.equal(await tryWith('10.0.0.' + i), 4001);   // el primero cambia, el último (del proxy) no
+  assert.equal(await tryWith('10.0.0.99'), 4029);
+}, { env: { ACCESS_CODE: 'clave', TRUST_PROXY: '1' } }));

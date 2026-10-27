@@ -96,6 +96,8 @@
   /* Mientras habla: círculo verde completo. Al soltar: se va consumiendo durante la espera de 500 ms. */
   .ring.drain circle { animation:drain var(--ms, 500ms) linear forwards; animation-delay:var(--delay, 0ms); }
   @keyframes drain { to { stroke-dashoffset:151; } }
+  /* Con la lista a la izquierda en un celular angosto, el texto de ayuda se achica para no quedar debajo de ella. */
+  @media (max-width:719px) { body.hasrail .hint { max-width:calc(100vw - 184px); margin-left:auto; margin-right:auto; } }
 
   /* ---------- Barra inferior ---------- */
   .dock { background:var(--bg1); border-top:1px solid var(--line); display:flex; justify-content:center;
@@ -135,8 +137,13 @@
   .item .sb { font-size:13px; color:var(--muted); }
   .item.col { flex-direction:column; align-items:stretch; gap:12px; }
   .item .top { display:flex; align-items:center; gap:12px; }
-  .actions { display:flex; gap:8px; }
-  .actions .btn { flex:1; }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; }
+  .actions .btn { flex:1 1 0; min-width:max-content; }
+  @media (max-width:420px) {
+    /* En celulares angostos los tres botones (Aceptar / Rechazar / Ignorar) tienen que caber en una fila. */
+    .actions .btn { padding:0 6px; font-size:13px; gap:4px; min-width:0; }
+    .actions .btn svg.ic { display:none; }
+  }
 
   .btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:36px; padding:0 14px;
          border:0; border-radius:8px; font-weight:600; font-size:14px; background:var(--bg4); color:var(--strong);
@@ -405,6 +412,7 @@
   function renderRail() {
     const list = railMembers(), rail = $('rail');
     rail.hidden = !list.length;
+    document.body.classList.toggle('hasrail', !!list.length);
     if (!list.length) return rail.replaceChildren();
     const cooling = !floor.d && floor.last && floor.end > Date.now();
     rail.replaceChildren(

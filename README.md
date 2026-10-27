@@ -49,7 +49,7 @@ netsh advfirewall firewall add rule name="Senal 3000" dir=in action=allow protoc
 [`Senal.apk`](Senal.apk) abre la página del servidor y además corre un **servicio en segundo plano**: aunque cierres la app, el celular sigue conectado y vibra cuando otro dispositivo aprieta.
 
 1. Pasá el APK al celular e instalalo (hay que permitir instalar apps desconocidas).
-2. Con el servidor corriendo, abrí la app una vez. Por defecto va a `http://192.168.1.16:3000`. Si no puede conectarse, muestra un cuadro para escribir la dirección correcta y la guarda.
+2. Con el servidor corriendo, abrí la app una vez. Por defecto va a `https://morse.gaelcloud.org`. Si no puede conectarse, muestra un cuadro para escribir la dirección correcta y la guarda.
 3. Si el servidor tiene código de acceso, la app lo pide la primera vez. Aceptá el permiso de notificaciones (Android lo exige para servicios permanentes) y la exención de ahorro de batería, para que Android no duerma la conexión con la pantalla apagada.
 4. Listo: queda una notificación discreta "Señal activa". Tiene un botón **Detener**; el servicio también arranca solo al prender el celular, salvo que lo hayas detenido.
 
@@ -88,7 +88,7 @@ Para recompilarlo hace falta JDK 17 y el SDK de Android; el proyecto está en [`
 npm test
 ```
 
-Son 49 tests del servidor (usan el runner integrado de Node, no hace falta instalar nada más). Cada uno levanta su propio servidor en un puerto al azar y con un `data.json` temporal. Cubren la señal, las solicitudes (aceptar, rechazar, ignorar, vencer), las reglas de una sola conexión, las salas, todas las desconexiones de la tabla anterior, que los datos sobrevivan a un reinicio, y la robustez ante mensajes basura, mensajes enormes, ids raros, rutas HTTP maliciosas, WebSockets de otros sitios web, el código de acceso (incluido el bloqueo), que no se filtren los ids secretos, los límites de mensajes y solicitudes, el vencimiento de salas vacías y los turnos de palabra (uno solo habla, espera de 500 ms, desconexión de quien habla).
+Son 54 tests del servidor (usan el runner integrado de Node, no hace falta instalar nada más). Cada uno levanta su propio servidor en un puerto al azar y con un `data.json` temporal. Cubren la señal, las solicitudes (aceptar, rechazar, ignorar, vencer), las reglas de una sola conexión, las salas, todas las desconexiones de la tabla anterior, que los datos sobrevivan a un reinicio, y la robustez ante mensajes basura, mensajes enormes, ids raros, rutas HTTP maliciosas, WebSockets de otros sitios web, el código de acceso (incluido el bloqueo), que no se filtren los ids secretos, los límites de mensajes y solicitudes, el vencimiento de salas vacías y los turnos de palabra (uno solo habla, espera de 500 ms, desconexión de quien habla), que los cambios seguidos se agrupen en un solo estado, y el funcionamiento detrás de un túnel (escuchar solo en 127.0.0.1, IP real del visitante).
 
 ## Archivos
 
@@ -117,6 +117,33 @@ $env:ACCESS_CODE="mi-clave"; node server.js  # PowerShell
 - Límites contra abuso: máximo de conexiones por minuto y por dispositivo, de mensajes por segundo, de solicitudes por minuto (10) y de salas (500).
 - Una sala en la que no hay nadie en línea durante 24 horas se borra (`ROOM_TTL_MS` lo cambia).
 
-Variables de entorno del servidor: `PORT`, `ACCESS_CODE`, `DATA_FILE` (dónde guardar `data.json`), `FLOOR_MS` (espera entre turnos, 500 por defecto), `TRUST_PROXY=1` (detrás de un proxy inverso, para contar los intentos por la dirección real del cliente), `ROOM_TTL_MS`.
+Variables de entorno del servidor: `PORT`, `ACCESS_CODE`, `DATA_FILE` (dónde guardar `data.json`), `HOST` (dónde escucha; `127.0.0.1` detrás de un túnel), `FLOOR_MS` (espera entre turnos, 500 por defecto), `TRUST_PROXY=1` (detrás de un túnel o proxy, para contar los intentos por la IP real del cliente), `ROOM_TTL_MS`.
 
-**Para usarlo desde un NAS o servidor, fuera del wifi de casa:** el código viaja en la dirección de conexión, y con `http` plano cualquiera que mire el tráfico de red podría leerlo. Poné el servidor detrás de un proxy inverso con **HTTPS** (Nginx Proxy Manager, Caddy o el que traiga tu NAS), activá `TRUST_PROXY=1` y abrí solo el puerto del proxy. La página usa `wss://` sola cuando se abre por `https`. En la app de Android, escribí la dirección `https://…` en el cuadro de servidor.
+## En un NAS o servidor con Cloudflare Tunnel (sin abrir puertos)
+
+Para usarlo fuera del wifi de casa **no hace falta abrir ningún puerto en el router**. Con [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) el NAS abre una conexión de salida hacia Cloudflare y esta entrega el tráfico por HTTPS. El servidor queda escuchando solo en la propia máquina:
+
+```bash
+HOST=127.0.0.1 PORT=3000 TRUST_PROXY=1 ACCESS_CODE=mi-clave node server.js
+```
+
+- `HOST=127.0.0.1`: el servidor no es alcanzable desde la red, solo por el túnel (cloudflared corre en la misma máquina). No hay puertos abiertos.
+- `TRUST_PROXY=1`: los límites y el bloqueo por intentos usan la IP real del visitante (`CF-Connecting-IP`, que Cloudflare pone y nadie puede falsificar) y no la del túnel. **Solo activalo si el servidor es alcanzable únicamente por el túnel** (por eso va junto con `HOST=127.0.0.1`).
+- `ACCESS_CODE`: **obligatorio** en cuanto esté en internet.
+- En el túnel, apuntá el nombre público al servidor local, por ejemplo en el `config.yml` de cloudflared:
+
+  ```yaml
+  ingress:
+    - hostname: morse.gaelcloud.org
+      service: http://localhost:3000
+    - service: http_status:404
+  ```
+
+  y creá el registro DNS con `cloudflared tunnel route dns <tu-túnel> morse.gaelcloud.org` (o desde el panel de Cloudflare Zero Trust).
+- HTTPS lo pone Cloudflare: el código de acceso no viaja en claro. La página usa `wss://` sola cuando se abre por `https`.
+- Los WebSockets funcionan por el túnel. La conexión no se corta por inactividad porque el servidor manda un ping cada 10 s y la app cada 30 s.
+- No cambies el encabezado `Host` en el túnel (`httpHostHeader`): el servidor compara el origen del navegador con el `Host` para rechazar WebSockets de otros sitios.
+- Si usás Cloudflare Access delante, el código de acceso de la app sigue siendo una segunda barrera. La app de Android no sabe iniciar sesión en Access, así que dejá libre este nombre (o una regla de omisión para el servicio) si querés usarla.
+- Elegí un puerto que no use otro programa del NAS: si el puerto está ocupado por otro proceso de Node, el servidor lo cierra para tomar su lugar.
+- Guardá `data.json` en una carpeta persistente con `DATA_FILE=/ruta/data.json`.
+
