@@ -78,6 +78,23 @@
   .press svg { width:84px; height:84px; fill:none; stroke:#fff; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
   .hint { margin:26px 0 0; font-size:13px; color:var(--muted); }
 
+  /* ---------- Quiénes están en la conexión / sala (a la izquierda) ---------- */
+  .stage { position:relative; }
+  .rail { position:absolute; left:8px; top:64px; bottom:8px; width:76px; z-index:1; overflow-y:auto; overflow-x:hidden;
+          display:flex; flex-direction:column; align-items:center; gap:12px; padding:6px 0; scrollbar-width:none; }
+  .rail::-webkit-scrollbar { display:none; }
+  .rail h5 { display:none; margin:0 0 2px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  .rm { display:flex; flex-direction:column; align-items:center; gap:5px; width:100%; min-width:0; }
+  .rm .nm { font-size:11px; font-weight:600; color:var(--muted); max-width:72px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rm.off .av { opacity:.45; }
+  .rm.talk .nm { color:var(--green); }
+  .avw { position:relative; width:52px; height:52px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .ring { position:absolute; inset:0; width:100%; height:100%; transform:rotate(-90deg); pointer-events:none; }
+  .ring circle { fill:none; stroke:var(--green); stroke-width:3; stroke-linecap:round; stroke-dasharray:151; stroke-dashoffset:0; }
+  /* Mientras habla: círculo verde completo. Al soltar: se va consumiendo durante la espera de 500 ms. */
+  .ring.drain circle { animation:drain var(--ms, 500ms) linear forwards; animation-delay:var(--delay, 0ms); }
+  @keyframes drain { to { stroke-dashoffset:151; } }
+
   /* ---------- Barra inferior ---------- */
   .dock { background:var(--bg1); border-top:1px solid var(--line); display:flex; justify-content:center;
           padding:10px 16px calc(10px + env(safe-area-inset-bottom)); }
@@ -182,6 +199,11 @@
     .card { height:min(700px, 88vh); max-width:500px; border-radius:16px; box-shadow:0 16px 48px rgba(0,0,0,.55); overflow:hidden; }
     .stage { justify-content:center; gap:48px; }
     .toast { bottom:100px; }
+    .rail { width:200px; left:20px; top:24px; align-items:stretch; gap:6px; }
+    .rail h5 { display:block; }
+    .rm { flex-direction:row; gap:10px; padding:4px 8px; border-radius:10px; }
+    .rm .nm { font-size:14px; max-width:none; color:var(--text); }
+    .rm.talk { background:var(--bg1); }
   }
   @media (max-height:640px) {
     .lamp { width:76px; height:76px; } .press { width:140px; height:140px; } .press svg { width:64px; height:64px; }
@@ -199,6 +221,7 @@
   </header>
 
   <main class="stage">
+    <aside id="rail" class="rail" aria-label="Quiénes están en la conexión" hidden></aside>
     <button id="pill" class="pill" style="border:1px solid var(--line)"><span class="pd"></span><span id="statusText" class="t">Conectando…</span></button>
     <div class="lampwrap">
       <div id="lamp" class="lamp" role="img" aria-label="Indicador de señal"></div>
@@ -344,10 +367,62 @@
     }
   }
 
+  // `blocked`: apretaste pero otra persona tiene la palabra; no se envía nada y la luz no se prende.
+  let blocked = false;
   function render() {
-    lamp.classList.toggle('on', held || others);
-    $('lampLabel').textContent = others ? 'Señal recibida' : held ? 'Enviando señal' : 'Esperando señal';
+    const sending = held && !blocked;
+    lamp.classList.toggle('on', sending || others);
+    $('lampLabel').textContent = others ? 'Señal recibida' : sending ? 'Enviando señal' : blocked ? 'Esperá tu turno' : 'Esperando señal';
     if (!inApp) updateVib();
+  }
+
+  // ---------- Turno de palabra ----------
+  // Habla una sola persona a la vez. El servidor decide; acá solo se evita mandar lo que sería rechazado.
+  const FLOOR_MS = 500;
+  let floor = { d: null, last: null, end: 0 }, floorTimer = null;   // d: quién habla; last: quién habló último
+  function setFloor(f) {
+    floor = { d: f.d, last: f.last, end: Date.now() + f.left };
+    clearTimeout(floorTimer);
+    if (!f.d && f.left > 0) floorTimer = setTimeout(renderRail, f.left + 30);   // al terminar la espera, se apaga el anillo
+    renderRail();
+  }
+  const inGroup = () => !!(st && (st.links.length || st.rooms.length));
+  function canTalk() {
+    if (!inGroup()) return true;
+    if (floor.d) return floor.d === st.me.d;
+    return floor.last === st.me.d || Date.now() >= floor.end;
+  }
+
+  function railMembers() {
+    if (!st) return [];
+    if (st.rooms[0]) return st.rooms[0].members.map(m => ({ d: m.me ? st.me.d : m.d, n: m.n, online: m.online, me: m.me }));
+    if (st.links[0]) return [{ d: st.me.d, n: st.me.n, online: true, me: true },
+                             { d: st.links[0].d, n: st.links[0].n, online: st.links[0].online }];
+    return [];
+  }
+  function renderRail() {
+    const list = railMembers(), rail = $('rail');
+    rail.hidden = !list.length;
+    if (!list.length) return rail.replaceChildren();
+    const cooling = !floor.d && floor.last && floor.end > Date.now();
+    rail.replaceChildren(
+      el('h5', {}, st.rooms[0] ? 'Sala ' + st.rooms[0].code : 'Conversación'),
+      ...list.map(m => {
+        const talking = floor.d === m.d, drain = cooling && floor.last === m.d;
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 52 52'); svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('class', 'ring' + (drain ? ' drain' : ''));
+        if (drain) {   // empieza donde corresponde si el aviso llegó con retraso
+          svg.style.setProperty('--ms', FLOOR_MS + 'ms');
+          svg.style.setProperty('--delay', -(FLOOR_MS - Math.max(0, floor.end - Date.now())) + 'ms');
+        }
+        const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        c.setAttribute('cx', 26); c.setAttribute('cy', 26); c.setAttribute('r', 24);
+        svg.append(c);
+        return el('div', { class: 'rm' + (talking ? ' talk' : '') + (m.online ? '' : ' off') },
+          el('div', { class: 'avw' }, avatar(m.n, 40, m.online, 'var(--bg2)'), talking || drain ? svg : null),
+          el('div', { class: 'nm' }, m.me ? m.n + ' (vos)' : m.n));
+      }));
   }
 
   // ---------- Conexión con el servidor ----------
@@ -371,7 +446,7 @@
       retries = 0;
       setPill('ok', 'Conectado');
       if (name) tx({ t: 'name', n: name });
-      if (held) sock.send('1');
+      if (held && !blocked) sock.send('1');
     };
     sock.onmessage = e => {
       const m = e.data;
@@ -380,12 +455,14 @@
       try { o = JSON.parse(m); } catch { return; }
       if (o.t === 'state') {
         o.sent.forEach(s => { s.end = Date.now() + s.left; });
-        st = o; renderStatus(); renderPanel();
-      } else if (o.t === 'ev') showEvent(o);
+        st = o; renderStatus(); renderPanel(); setFloor(o.floor);
+      } else if (o.t === 'floor') setFloor(o);
+      else if (o.t === 'deny') { setFloor(o); blocked = true; render(); }   // otra persona tiene la palabra
+      else if (o.t === 'ev') showEvent(o);
     };
     sock.onclose = e => {
       if (sock !== ws) return;   // un socket viejo que ya reemplazamos
-      st = null; setOthers(false); renderPanel();
+      st = null; setOthers(false); renderPanel(); renderRail();
       if (e.code === 4001) {   // el servidor pide un código de acceso (o el que hay es incorrecto): no reintentar a ciegas
         setPill('warn', 'Falta el código de acceso');
         askCode(code ? 'Ese código no es correcto. Probá de nuevo.' : '');
@@ -435,7 +512,9 @@
     if (held === down) return;
     held = down;
     btn.classList.toggle('down', down);
-    if (ws.readyState === 1) ws.send(down ? '1' : '0');
+    if (down) blocked = !canTalk();                      // si habla otra persona, no se envía nada
+    if (ws.readyState === 1 && !blocked) ws.send(down ? '1' : '0');
+    if (!down) blocked = false;
     render();
   }
   btn.addEventListener('pointerdown', e => { btn.setPointerCapture(e.pointerId); send(true); });

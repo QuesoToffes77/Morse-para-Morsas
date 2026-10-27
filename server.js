@@ -130,7 +130,52 @@ const sameCode = k => {   // comparación de tiempo constante
   return crypto.timingSafeEqual(h(k), h(ACCESS_CODE));
 };
 let socketSeq = 0;
-const pressing = new Set(); // sockets con el botón apretado
+const pressing = new Set(); // sockets con el botón apretado (y con permiso para hablar)
+
+// ---------- Turno de palabra ----------
+// En cada conexión (o sala) habla una sola persona a la vez. Al soltar, la palabra queda reservada
+// FLOOR_MS: nadie más puede tomarla en ese lapso (quien habló último sí puede volver a apretar enseguida,
+// si no los puntos y rayas rápidos de un mensaje en Morse serían imposibles).
+const FLOOR_MS = Number(process.env.FLOOR_MS) || 500;
+const floors = new Map();   // id del grupo -> { holder, last, freeAt }
+
+/** Grupo de señal de un dispositivo: su conexión directa o su sala (solo puede estar en uno). */
+function groupOf(dev) {
+  for (const k of db.links) { const p = k.split('|'); if (p.includes(dev)) return { id: 'l:' + k, devs: p }; }
+  for (const [c, r] of Object.entries(db.rooms)) if (r.members.includes(dev)) return { id: 'r:' + c, devs: r.members };
+  return null;
+}
+function floorInfo(g) {
+  const f = g && floors.get(g.id);
+  if (!f) return { d: null, last: null, left: 0 };
+  return { d: f.holder ? pub(f.holder) : null, last: f.last ? pub(f.last) : null,
+           left: f.holder ? 0 : Math.max(0, f.freeAt - Date.now()) };
+}
+function sendFloor(g) {
+  const msg = JSON.stringify({ t: 'floor', ...floorInfo(g) });
+  for (const d of g.devs) for (const c of socketsOf(d)) if (!c.svc) c.send(msg);
+}
+function press(ws) {
+  const g = groupOf(ws.dev);
+  if (!g) { pressing.add(ws); return notify(); }   // sin conexión: solo se prende la luz propia
+  const f = floors.get(g.id) || { holder: null, last: null, freeAt: 0 };
+  const mine = f.holder === ws.dev || (!f.holder && (f.last === ws.dev || Date.now() >= f.freeAt));
+  if (!mine) return ws.send(JSON.stringify({ t: 'deny', ...floorInfo(g) }));
+  f.holder = ws.dev; f.last = ws.dev; floors.set(g.id, f);
+  pressing.add(ws);
+  notify(); sendFloor(g);
+}
+function release(ws) {
+  pressing.delete(ws);
+  const still = [...pressing].some(p => p.dev === ws.dev);
+  for (const [id, f] of floors) {
+    if (f.holder !== ws.dev || still) continue;
+    f.holder = null; f.freeAt = Date.now() + FLOOR_MS;
+    const g = groupOf(ws.dev);
+    if (g && g.id === id) sendFloor(g);
+  }
+  notify();
+}
 
 // ---------- Señal ----------
 // Manda a cada cliente si hay un dispositivo conectado apretando; solo si cambió, para no mandar de más.
@@ -163,8 +208,9 @@ function stateFor(dev) {
       .map(d => ({ d: pub(d), n: nameOf(d), online: onlineDevs().has(d) })),
     rooms: Object.entries(db.rooms).filter(([, r]) => r.members.includes(dev)).map(([code, r]) => ({
       code, host: r.host === dev, hostName: nameOf(r.host),
-      members: r.members.map(m => ({ n: nameOf(m), me: m === dev, online: onlineDevs().has(m) })),
+      members: r.members.map(m => ({ d: pub(m), n: nameOf(m), me: m === dev, online: onlineDevs().has(m) })),
     })),
+    floor: floorInfo(groupOf(dev)),
     inbox: reqs.filter(r => r.to === dev && !r.ignored).map(r => ({ id: r.id, kind: r.kind, code: r.code, from: nameOf(r.from) })),
     sent: reqs.filter(r => r.from === dev).map(r => ({
       id: r.id, kind: r.kind, to: pub(r.to), toName: nameOf(r.to), code: r.code, left: Math.max(0, r.until - Date.now()),
@@ -316,6 +362,7 @@ setInterval(() => {
     for (const q of [...pending.values()]) if (q.kind === 'join' && q.code === code) resolve(q, 'closed');
     changed = true;
   }
+  for (const [id, f] of floors) if (!f.holder && now - f.freeAt > 60000) floors.delete(id);   // turnos viejos
   if (changed) { save(); broadcastState(); notify(); }
 }, SWEEP_MS).unref();
 
@@ -351,8 +398,7 @@ wss.on('connection', (ws, req) => {
       const m = String(raw);
       if (m === '1' || m === '0') {
         if (!rate('sig', ws.id, 100, 5000)) return;   // un humano no aprieta más de ~20 veces por segundo
-        if (m === '1') pressing.add(ws); else pressing.delete(ws);
-        notify();
+        if (m === '1') press(ws); else release(ws);
       } else if (m[0] === '{') {
         if (!rate('ctl', ws.id, 40, 10000)) return fail(ws, 'Más despacio');
         let o;
@@ -364,7 +410,7 @@ wss.on('connection', (ws, req) => {
     }
   });
   ws.on('close', () => {
-    pressing.delete(ws);
+    release(ws);   // si tenía la palabra, la suelta (con la misma espera de siempre)
     if (!socketsOf(ws.dev).length) {   // el dispositivo se fue del todo (ni página ni servicio)
       for (const r of [...pending.values()]) {
         if (r.from === ws.dev) { clearTimeout(r.timer); pending.delete(r.id); }   // su solicitud ya no tiene sentido

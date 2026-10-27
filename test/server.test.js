@@ -33,6 +33,8 @@ class Client {
     this.signals = [];   // "1"/"0" recibidos
     this.events = [];    // {t:'ev'} (aceptada, rechazada, error...)
     this.reqs = [];      // {t:'req'} (aviso de solicitud entrante)
+    this.floors = [];    // {t:'floor'}: quién tiene la palabra
+    this.denies = [];    // {t:'deny'}: apretó pero habla otra persona
     this.st = null;      // último {t:'state'}
     this.closed = false;
     this.ws = new WebSocket(`ws://127.0.0.1:${srv.port}/?d=${dev}${svc ? '&s=1' : ''}${code != null ? '&k=' + encodeURIComponent(code) : ''}`, origin ? { origin } : {});
@@ -41,6 +43,7 @@ class Client {
       if (m[0] !== '{') return this.signals.push(m);
       const o = JSON.parse(m);
       if (o.t === 'state') this.st = o; else if (o.t === 'ev') this.events.push(o); else if (o.t === 'req') this.reqs.push(o);
+      else if (o.t === 'floor') this.floors.push(o); else if (o.t === 'deny') this.denies.push(o);
     });
     this.ws.on('close', c => { this.closed = true; this.closeCode = c; });
     this.ws.on('error', e => { this.error = e; });
@@ -622,3 +625,84 @@ test('una sala sin nadie en línea se borra pasado el tiempo; con alguien en lí
   await sleep(150);
   assert.equal(again.st.rooms.length, 0, 'la sala vacía debía borrarse');
 }, { env: { ROOM_TTL_MS: '300', SWEEP_MS: '100' } }));
+
+// ---------------------------------------------------------------- turno de palabra
+
+const FLOOR = { env: { FLOOR_MS: '300' } };
+
+test('habla una sola persona a la vez: si A tiene la palabra, B no puede hablar', withServer(async srv => {
+  const a = await srv.client('aaaaaaaa', { name: 'Ana' }).ready(), b = await srv.client('bbbbbbbb', { name: 'Beto' }).ready();
+  const c = await srv.client('cccccccc', { name: 'Cris' }).ready();
+  await link(a, b);
+  a.press();
+  await waitFor(() => b.last === '1', 2500, 'que B reciba a A');
+  assert.equal(b.floors.at(-1).d, pub('aaaaaaaa'), 'todos los de la conexión saben quién habla');
+  b.press();
+  await waitFor(() => b.denies.length, 2500, 'que B sea rechazado');
+  await sleep(100);
+  assert.ok(!a.signals.includes('1'), 'A no debe recibir el toque rechazado de B');
+  assert.equal(b.last, '1', 'B sigue recibiendo a A');
+  assert.equal(b.denies[0].d, pub('aaaaaaaa'));
+  assert.equal(c.floors.length, 0, 'quien no está en la conexión no se entera');
+}, FLOOR));
+
+test('al soltar, la palabra queda reservada un momento; pasado ese lapso otro puede hablar', withServer(async srv => {
+  const a = await srv.client('aaaaaaaa').ready(), b = await srv.client('bbbbbbbb').ready();
+  await link(a, b);
+  a.press(); await waitFor(() => b.last === '1');
+  a.release(); await waitFor(() => b.last === '0');
+  assert.equal(b.floors.at(-1).d, null);
+  assert.ok(b.floors.at(-1).left > 0 && b.floors.at(-1).last === pub('aaaaaaaa'), 'se informa la espera y quién habló último');
+  b.release(); b.press();                       // dentro de la espera: rechazado
+  await waitFor(() => b.denies.length, 2500, 'rechazo durante la espera');
+  await sleep(450);                              // la espera (300 ms) ya pasó
+  b.release(); b.press();
+  await waitFor(() => a.last === '1', 2500, 'que ahora A reciba a B');
+  assert.equal(a.floors.at(-1).d, pub('bbbbbbbb'));
+}, FLOOR));
+
+test('quien habló último puede volver a apretar enseguida (puntos y rayas rápidos)', withServer(async srv => {
+  const a = await srv.client('aaaaaaaa').ready(), b = await srv.client('bbbbbbbb').ready();
+  await link(a, b);
+  for (let i = 0; i < 4; i++) {
+    a.press(); await waitFor(() => b.signals.filter(x => x === '1').length === i + 1, 2500, 'toque ' + i);
+    a.release(); await waitFor(() => b.signals.filter(x => x === '0').length === i + 1, 2500, 'suelta ' + i);
+  }
+  assert.equal(a.denies.length, 0);
+}, { env: { FLOOR_MS: '5000' } }));
+
+test('en una sala habla uno solo y los demás reciben; otro miembro no puede interrumpir', withServer(async srv => {
+  const host = await srv.client('hhhhhhhh', { name: 'Hugo' }).ready();
+  host.tx({ t: 'create' }); await waitFor(() => host.st.rooms.length);
+  const code = host.st.rooms[0].code, ms = [];
+  for (const id of ['m1m1m1m1', 'm2m2m2m2']) {
+    const m = await srv.client(id, { name: id.slice(0, 2) }).ready(); ms.push(m);
+    m.tx({ t: 'join', code }); await waitFor(() => host.st.inbox.length);
+    host.tx({ t: 'answer', id: host.st.inbox[0].id, ok: true }); await waitFor(() => m.st.rooms.length);
+  }
+  const [m1, m2] = ms;
+  m1.press(); await waitFor(() => host.last === '1' && m2.last === '1');
+  m2.press(); await waitFor(() => m2.denies.length, 2500, 'que m2 no pueda interrumpir');
+  host.press(); await waitFor(() => host.denies.length, 2500, 'que el anfitrión tampoco');
+  assert.ok(!m1.signals.includes('1'), 'quien habla no se oye a sí mismo');
+  assert.deepEqual(host.st.rooms[0].members.map(x => typeof x.d), ['string', 'string', 'string']);
+}, FLOOR));
+
+test('si quien tiene la palabra se desconecta, la palabra se libera', withServer(async srv => {
+  const a = await srv.client('aaaaaaaa').ready(), b = await srv.client('bbbbbbbb').ready();
+  await link(a, b);
+  a.press(); await waitFor(() => b.last === '1');
+  await a.close();
+  await waitFor(() => b.last === '0', 2500, 'que se apague la luz de B');
+  await sleep(400);                              // pasa la espera de 300 ms
+  b.press();
+  await sleep(150);
+  assert.equal(b.denies.length, 0, 'B debe poder hablar');
+  assert.equal(b.floors.at(-1).d, pub('bbbbbbbb'));
+}, FLOOR));
+
+test('sin conexión no hay turnos: apretar nunca es rechazado', withServer(async srv => {
+  const a = await srv.client('aaaaaaaa').ready(), b = await srv.client('bbbbbbbb').ready();
+  a.press(); b.press(); await sleep(150);
+  assert.equal(a.denies.length + b.denies.length, 0);
+}, FLOOR));

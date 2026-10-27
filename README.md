@@ -10,6 +10,19 @@ La señal solo llega entre dispositivos conectados, y cada dispositivo puede est
 - **Salas:** **Crear sala** te da un código de 4 letras; el resto se une con **Unirme** y ese código. Quien crea la sala es el anfitrión y decide quién entra. Todos los miembros de una sala se ven entre sí. Si el anfitrión cierra la sala, se disuelve.
 - **Solicitudes** (a la derecha): lo que te mandaron, con **Aceptar**, **Rechazar** o **Ignorar**. Si no respondés (o ignorás), a quien la mandó le vence a los 20 segundos y ve "no respondió". Si la app está cerrada, te llega una notificación.
 
+## Quién habla
+
+Cuando estás conectado con alguien o dentro de una sala, a la **izquierda** de la pantalla principal aparece la lista de quiénes están ahí (en pantallas grandes con su nombre al lado). **Habla una sola persona a la vez**:
+
+- Quien tiene la palabra se marca con un **círculo verde** en su perfil, y su nombre se resalta.
+- Si otra persona aprieta mientras alguien habla, no se envía nada: la luz no se prende y el botón muestra "Esperá tu turno".
+- Al soltar, el círculo verde **se va consumiendo como una ruedita** durante 500 ms. Hasta que termina, nadie más puede tomar la palabra; después, cualquiera puede.
+- Quien habló último puede volver a apretar enseguida, sin esperar. Si no, los puntos y rayas rápidos de un mensaje en Morse serían imposibles.
+- Si quien tiene la palabra se desconecta, la suelta (con la misma espera de 500 ms).
+- Sin conexión con nadie no hay turnos: la luz propia se prende igual, sin que nadie más la reciba.
+
+El servidor es quien decide el turno; la espera se puede cambiar con la variable `FLOOR_MS`.
+
 La primera vez te pide un nombre (es lo que ven los demás). Las conexiones, salas y nombres se guardan en `data.json` junto al servidor, así sobreviven a un reinicio.
 
 ## Cómo usarlo
@@ -73,7 +86,7 @@ Para recompilarlo hace falta JDK 17 y el SDK de Android; el proyecto está en [`
 npm test
 ```
 
-Son 43 tests del servidor (usan el runner integrado de Node, no hace falta instalar nada más). Cada uno levanta su propio servidor en un puerto al azar y con un `data.json` temporal. Cubren la señal, las solicitudes (aceptar, rechazar, ignorar, vencer), las reglas de una sola conexión, las salas, todas las desconexiones de la tabla anterior, que los datos sobrevivan a un reinicio, y la robustez ante mensajes basura, mensajes enormes, ids raros, rutas HTTP maliciosas, WebSockets de otros sitios web, el código de acceso (incluido el bloqueo), que no se filtren los ids secretos, los límites de mensajes y solicitudes, y el vencimiento de salas vacías.
+Son 49 tests del servidor (usan el runner integrado de Node, no hace falta instalar nada más). Cada uno levanta su propio servidor en un puerto al azar y con un `data.json` temporal. Cubren la señal, las solicitudes (aceptar, rechazar, ignorar, vencer), las reglas de una sola conexión, las salas, todas las desconexiones de la tabla anterior, que los datos sobrevivan a un reinicio, y la robustez ante mensajes basura, mensajes enormes, ids raros, rutas HTTP maliciosas, WebSockets de otros sitios web, el código de acceso (incluido el bloqueo), que no se filtren los ids secretos, los límites de mensajes y solicitudes, el vencimiento de salas vacías y los turnos de palabra (uno solo habla, espera de 500 ms, desconexión de quien habla).
 
 ## Archivos
 
@@ -102,6 +115,6 @@ $env:ACCESS_CODE="mi-clave"; node server.js  # PowerShell
 - Límites contra abuso: máximo de conexiones por minuto y por dispositivo, de mensajes por segundo, de solicitudes por minuto (10) y de salas (500).
 - Una sala en la que no hay nadie en línea durante 24 horas se borra (`ROOM_TTL_MS` lo cambia).
 
-Variables de entorno del servidor: `PORT`, `ACCESS_CODE`, `DATA_FILE` (dónde guardar `data.json`), `TRUST_PROXY=1` (detrás de un proxy inverso, para contar los intentos por la dirección real del cliente), `ROOM_TTL_MS`.
+Variables de entorno del servidor: `PORT`, `ACCESS_CODE`, `DATA_FILE` (dónde guardar `data.json`), `FLOOR_MS` (espera entre turnos, 500 por defecto), `TRUST_PROXY=1` (detrás de un proxy inverso, para contar los intentos por la dirección real del cliente), `ROOM_TTL_MS`.
 
 **Para usarlo desde un NAS o servidor, fuera del wifi de casa:** el código viaja en la dirección de conexión, y con `http` plano cualquiera que mire el tráfico de red podría leerlo. Poné el servidor detrás de un proxy inverso con **HTTPS** (Nginx Proxy Manager, Caddy o el que traiga tu NAS), activá `TRUST_PROXY=1` y abrí solo el puerto del proxy. La página usa `wss://` sola cuando se abre por `https`. En la app de Android, escribí la dirección `https://…` en el cuadro de servidor.
