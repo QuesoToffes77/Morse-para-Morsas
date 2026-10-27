@@ -52,6 +52,7 @@
   .b.bad { background:#5a2326; color:#ffd6d6; }
   .b:disabled { opacity:.6; cursor:default; }
   .empty { color:var(--mute); font-size:14px; padding:6px 2px; }
+  .note { background:#2b2a1c; color:#f0dc8a; border-radius:10px; padding:10px 12px; font-size:13px; margin:10px 0 0; }
   .code { font-size:26px; letter-spacing:.2em; font-weight:700; }
   .joinbox { display:flex; gap:8px; }
   .joinbox input, .modal input { flex:1; min-width:0; background:var(--card); color:var(--fg); border:1px solid #333a44;
@@ -253,13 +254,17 @@
   let tab = 'people', joinCode = '';
 
   function peopleView() {
-    const out = [el('h3', {}, 'Conectados ahora')];
+    const out = [];
+    if (st.busy) out.push(el('div', { class: 'note' }, 'Ya estás conectado. Para conectarte con otra persona, primero desconectate o salí de tu sala.'));
+    out.push(el('h3', {}, 'Conectados ahora'));
     if (!st.online.length) out.push(el('div', { class: 'empty' }, 'No hay nadie más conectado. Abrí la app en otro dispositivo.'));
     for (const p of st.online) {
       const s = st.sent.find(x => x.kind === 'link' && x.to === p.d);
       out.push(row(who(p.n, null, true),
         p.linked ? el('span', { class: 'sub' }, 'Conectado ✓')
         : s ? el('button', { class: 'b', disabled: '' }, 'Conectando… ', countdown(s))
+        : p.busy ? el('span', { class: 'sub' }, 'Ocupado')
+        : st.busy ? el('button', { class: 'b', disabled: '' }, 'Conectar')
         : el('button', { class: 'b', onclick: () => tx({ t: 'link', to: p.d }) }, 'Conectar')));
     }
     out.push(el('h3', {}, 'Mis conexiones'));
@@ -271,13 +276,18 @@
   }
 
   function roomsView() {
-    const out = [el('h3', {}, 'Crear una sala'),
-      el('button', { class: 'b', onclick: () => tx({ t: 'create' }) }, 'Crear sala'),
-      el('h3', {}, 'Unirse a una sala'),
-      el('div', { class: 'joinbox' },
-        el('input', { id: 'joincode', maxlength: '4', placeholder: 'CÓDIGO', autocomplete: 'off',
-                      oninput: e => { joinCode = e.target.value.toUpperCase(); } }),
-        el('button', { class: 'b', onclick: () => { if (joinCode.length === 4) tx({ t: 'join', code: joinCode }); } }, 'Unirme'))];
+    const out = [];
+    if (st.busy) {
+      out.push(el('div', { class: 'note' }, 'Ya estás conectado. Para crear una sala o unirte a otra, primero desconectate o salí de tu sala actual.'));
+    } else {
+      out.push(el('h3', {}, 'Crear una sala'),
+        el('button', { class: 'b', onclick: () => tx({ t: 'create' }) }, 'Crear sala'),
+        el('h3', {}, 'Unirse a una sala'),
+        el('div', { class: 'joinbox' },
+          el('input', { id: 'joincode', maxlength: '4', placeholder: 'CÓDIGO', autocomplete: 'off',
+                        oninput: e => { joinCode = e.target.value.toUpperCase(); } }),
+          el('button', { class: 'b', onclick: () => { if (joinCode.length === 4) tx({ t: 'join', code: joinCode }); } }, 'Unirme')));
+    }
     for (const s of st.sent.filter(x => x.kind === 'join'))
       out.push(row(who('Sala ' + s.code, 'Esperando que te acepten'), el('button', { class: 'b', disabled: '' }, 'Conectando… ', countdown(s))));
     out.push(el('h3', {}, 'Mis salas'));
@@ -333,6 +343,7 @@
       accepted: o.who + ' aceptó tu solicitud' + sala,
       rejected: o.who + ' rechazó tu solicitud' + sala,
       expired: o.who + ' no respondió' + sala,
+      busy: 'No se pudo conectar con ' + o.who + ': ya está conectado con otro',
       error: o.msg,
     }[o.k] || '');
   }

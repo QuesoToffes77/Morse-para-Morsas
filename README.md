@@ -4,7 +4,7 @@ Una página con un botón en el medio. Mientras alguien lo mantiene apretado, se
 
 ## Conexiones y salas
 
-La señal solo llega entre dispositivos conectados. Abajo hay un botón **Conexión** que abre un panel con tres pestañas:
+La señal solo llega entre dispositivos conectados, y cada dispositivo puede estar en **una sola conexión a la vez**: con una persona o dentro de una sala (para cambiar, primero hay que desconectarse o salir). Abajo hay un botón **Conexión** que abre un panel con tres pestañas:
 
 - **Personas:** todos los que tienen la app abierta o en segundo plano. Con **Conectar** les mandás una solicitud; el botón dice "Conectando… 20 s" mientras esperás. Abajo ves tus conexiones y podés desconectarte.
 - **Salas:** **Crear sala** te da un código de 4 letras; el resto se une con **Unirme** y ese código. Quien crea la sala es el anfitrión y decide quién entra. Todos los miembros de una sala se ven entre sí. Si el anfitrión cierra la sala, se disuelve.

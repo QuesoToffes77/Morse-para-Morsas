@@ -25,6 +25,10 @@ const key = (a, b) => [a, b].sort().join('|');
 const isLinked = (a, b) => db.links.includes(key(a, b));
 const nameOf = d => db.names[d] || 'Dispositivo ' + d.slice(0, 4);
 
+/** Un dispositivo solo puede estar en una conexión a la vez: con una persona O dentro de una sala. */
+const busy = dev => db.links.some(k => k.split('|').includes(dev)) ||
+                    Object.values(db.rooms).some(r => r.members.includes(dev));
+
 /** Dispositivos con los que `dev` comparte señal: conexiones directas + miembros de sus salas. */
 function neighbors(dev) {
   const s = new Set();
@@ -75,7 +79,8 @@ function stateFor(dev) {
   return {
     t: 'state',
     me: { d: dev, n: nameOf(dev) },
-    online: [...onlineDevs()].filter(d => d !== dev).map(d => ({ d, n: nameOf(d), linked: nb.has(d) })),
+    busy: busy(dev),
+    online: [...onlineDevs()].filter(d => d !== dev).map(d => ({ d, n: nameOf(d), linked: nb.has(d), busy: busy(d) })),
     links: db.links.map(k => k.split('|')).filter(p => p.includes(dev)).map(p => p.find(d => d !== dev))
       .map(d => ({ d, n: nameOf(d), online: onlineDevs().has(d) })),
     rooms: Object.entries(db.rooms).filter(([, r]) => r.members.includes(dev)).map(([code, r]) => ({
@@ -154,11 +159,13 @@ function handle(ws, o) {
       const to = String(o.to);
       if (to === dev || !onlineDevs().has(to)) return fail(ws, 'Esa persona no está conectada');
       if (isLinked(dev, to)) return fail(ws, 'Ya están conectados');
+      if (busy(dev)) return fail(ws, 'Ya estás conectado: desconectate primero');
+      if (busy(to)) return fail(ws, nameOf(to) + ' ya está conectado con alguien');
       createRequest(ws, 'link', to);
       break;
     }
     case 'create': {
-      if (Object.values(db.rooms).filter(r => r.host === dev).length >= 5) return fail(ws, 'Ya tenés muchas salas');
+      if (busy(dev)) return fail(ws, 'Ya estás conectado: desconectate o salí de tu sala primero');
       db.rooms[newCode()] = { host: dev, members: [dev] };
       save(); broadcastState();
       break;
@@ -168,6 +175,7 @@ function handle(ws, o) {
       const room = db.rooms[code];
       if (!room) return fail(ws, 'No existe una sala con ese código');
       if (room.members.includes(dev)) return fail(ws, 'Ya estás en esa sala');
+      if (busy(dev)) return fail(ws, 'Ya estás conectado: desconectate o salí de tu sala primero');
       if (!onlineDevs().has(room.host)) return fail(ws, 'El anfitrión de la sala no está conectado');
       createRequest(ws, 'join', room.host, code);
       break;
@@ -176,7 +184,11 @@ function handle(ws, o) {
       const req = pending.get(String(o.id));
       if (!req || req.to !== dev) return;
       if (o.t === 'ignore') { req.ignored = true; broadcastState(); }   // el otro sigue esperando hasta que venza
-      else resolve(req, o.ok ? 'accepted' : 'rejected');
+      else if (o.ok && (busy(req.from) || (req.kind === 'link' && busy(req.to)))) {
+        // Mientras esperaba, alguno de los dos se conectó con otro.
+        fail(ws, 'No se pudo: alguno ya está conectado con otro');
+        resolve(req, 'busy');
+      } else resolve(req, o.ok ? 'accepted' : 'rejected');
       break;
     }
     case 'unlink': {
