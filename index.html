@@ -61,12 +61,12 @@
   const inApp = !!(window.AndroidBridge && AndroidBridge.deviceId);
   const deviceId = inApp ? AndroidBridge.deviceId() : Math.random().toString(36).slice(2);
 
-  // Solo en el navegador (en la app vibra el servicio): vibra mientras aprieta este celu u otro,
-  // y un toque corto se mantiene un mínimo para que se sienta.
+  // Solo en el navegador (en la app vibra el servicio): vibra mientras aprieta OTRO dispositivo, nunca por
+  // el toque propio; un toque corto se mantiene un mínimo para que se sienta.
   let vibOn = false, vibSince = 0, vibStop = null;
   function updateVib() {
     const buzz = ms => navigator.vibrate && navigator.vibrate(ms);
-    if (held || others) {
+    if (others) {
       clearTimeout(vibStop); vibStop = null;
       if (!vibOn) {
         vibOn = true; vibSince = Date.now();
@@ -99,7 +99,6 @@
     held = down;
     btn.classList.toggle('down', down);
     if (ws.readyState === 1) ws.send(down ? '1' : '0');
-    if (inApp && AndroidBridge.setSelf) AndroidBridge.setSelf(down);   // (APK viejo no lo tiene)
     render();
   }
   btn.addEventListener('pointerdown', e => { btn.setPointerCapture(e.pointerId); send(true); });

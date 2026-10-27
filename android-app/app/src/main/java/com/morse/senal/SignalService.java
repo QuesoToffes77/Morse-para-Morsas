@@ -41,10 +41,6 @@ public class SignalService extends Service {
     private static final String CHANNEL = "senal";
     private static final int NOTIF_ID = 1;
     private static final int MIN_VIBRATION_MS = 100;
-
-    /** Instancia viva, para que la actividad (mismo proceso) le avise del toque propio. */
-    static volatile SignalService instance;
-
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable reconnect = this::connect;
     private OkHttpClient client;
@@ -54,7 +50,6 @@ public class SignalService extends Service {
     private ConnectivityManager.NetworkCallback netCallback;
     private SharedPreferences prefs;
     private int attempt = 0;
-    private boolean selfHeld = false, othersOn = false;
     private boolean vibrating = false;
     private long vibratingSince;
     private Runnable pendingStop;
@@ -73,7 +68,6 @@ public class SignalService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        instance = this;
         prefs = getSharedPreferences("senal", MODE_PRIVATE);
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
         client = new OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build();
@@ -169,19 +163,8 @@ public class SignalService extends Service {
         });
     }
 
-    /** Lo llama la página cuando este mismo celu aprieta o suelta su botón: también vibra (feedback propio). */
-    void setSelf(boolean on) {
-        main.post(() -> { selfHeld = on; update(); });
-    }
-
+    /** Vibra mientras OTRO dispositivo aprieta (nunca por el toque propio); un toque corto se mantiene un mínimo para que se sienta. */
     private void onSignal(boolean on) {
-        othersOn = on;
-        update();
-    }
-
-    /** Vibra mientras aprieta este celu u otro; un toque corto se mantiene un mínimo para que se sienta. */
-    private void update() {
-        boolean on = selfHeld || othersOn;
         if (on) {
             if (pendingStop != null) { main.removeCallbacks(pendingStop); pendingStop = null; }
             if (!vibrating) {
@@ -206,7 +189,6 @@ public class SignalService extends Service {
 
     @Override
     public void onDestroy() {
-        instance = null;
         cm.unregisterNetworkCallback(netCallback);
         main.removeCallbacksAndMessages(null);
         stopVibration();
