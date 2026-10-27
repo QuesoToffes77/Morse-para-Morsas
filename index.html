@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Señal</title>
+<style>
+  :root { --bg:#14161a; --fg:#e8eaed; --btn:#2a2f38; --red:#ff2b2b; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; }
+  html,body { height:100%; margin:0; }
+  body { background:var(--bg); color:var(--fg); font-family:system-ui,sans-serif;
+         display:flex; flex-direction:column; align-items:center; }
+  .top { padding-top:8vh; text-align:center; }
+  .lamp { width:90px; height:90px; border-radius:50%; background:#3a1414; border:4px solid #555;
+          transition:background .05s, box-shadow .05s; margin:0 auto; }
+  .lamp.on { background:var(--red); box-shadow:0 0 40px 18px rgba(255,43,43,.7); border-color:#ff8a8a; }
+  .status { margin-top:16px; font-size:14px; opacity:.6; min-height:20px; }
+  .mid { flex:1; display:flex; align-items:center; justify-content:center; }
+  .btn { width:180px; height:180px; border-radius:50%; border:none; background:var(--btn);
+         box-shadow:0 8px 0 #111, 0 12px 24px rgba(0,0,0,.5); cursor:pointer; touch-action:none;
+         display:flex; align-items:center; justify-content:center; transition:transform .05s, box-shadow .05s; }
+  .btn.down { transform:translateY(6px); box-shadow:0 2px 0 #111, 0 4px 10px rgba(0,0,0,.5); background:#353b46; }
+  .btn svg { width:90px; height:90px; fill:none; stroke:var(--fg); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div id="lamp" class="lamp"></div>
+    <div id="status" class="status">conectando…</div>
+  </div>
+  <div class="mid">
+    <button id="btn" class="btn" aria-label="Apretar">
+      <!-- mano con dedo apuntando (símbolo de "tocar") -->
+      <svg viewBox="0 0 24 24"><path d="M9 11V5a1.5 1.5 0 0 1 3 0v5.5l4.2.9a2 2 0 0 1 1.6 2.2l-.6 4.3a3 3 0 0 1-3 2.6H11a3 3 0 0 1-2.3-1.1L5.5 14.7a1.5 1.5 0 0 1 2.2-2L9 14"/></svg>
+    </button>
+  </div>
+
+<script>
+  const lamp = document.getElementById('lamp');
+  const status = document.getElementById('status');
+  const btn = document.getElementById('btn');
+
+  let held = false, others = false, ws, vibTimer = null;
+
+  // Un toque corto llega como "1" y "0" casi juntos: se mantiene lo recibido un mínimo para que se note.
+  const MIN_MS = 150;
+  let shownAt = 0, offTimer = null;
+  function setOthers(v) {
+    if (v) {
+      clearTimeout(offTimer); offTimer = null;
+      if (!others) { others = true; shownAt = Date.now(); }
+    } else if (others && !offTimer) {
+      offTimer = setTimeout(() => { offTimer = null; others = false; render(); },
+                            Math.max(0, MIN_MS - (Date.now() - shownAt)));
+    }
+    render();
+  }
+
+  // En la app Android se usa la vibración nativa (AndroidBridge); en el navegador, navigator.vibrate.
+  const vib = ms => window.AndroidBridge ? (ms ? AndroidBridge.vibrate(ms) : AndroidBridge.cancel())
+                                         : navigator.vibrate && navigator.vibrate(ms);
+
+  function render() {
+    lamp.classList.toggle('on', held || others);
+    if (others && !vibTimer) {            // vibra mientras OTRO aprieta
+      vib(10000);
+      vibTimer = setInterval(() => vib(10000), 9000);
+    } else if (!others && vibTimer) {
+      clearInterval(vibTimer); vibTimer = null; vib(0);
+    }
+  }
+
+  function connect() {
+    ws = new WebSocket('ws://' + location.host);
+    ws.onopen = () => { status.textContent = 'conectado'; if (held) ws.send('1'); };
+    ws.onmessage = e => setOthers(e.data === '1');
+    ws.onclose = () => { status.textContent = 'reconectando…'; setOthers(false); setTimeout(connect, 1000); };
+  }
+  connect();
+
+  function send(down) {
+    if (held === down) return;
+    held = down;
+    btn.classList.toggle('down', down);
+    if (ws.readyState === 1) ws.send(down ? '1' : '0');
+    render();
+  }
+  btn.addEventListener('pointerdown', e => { btn.setPointerCapture(e.pointerId); send(true); });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => btn.addEventListener(t, () => send(false)));
+  btn.addEventListener('contextmenu', e => e.preventDefault());
+  addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat) { e.preventDefault(); send(true); } });
+  addEventListener('keyup', e => { if (e.code === 'Space') send(false); });
+</script>
+</body>
+</html>
