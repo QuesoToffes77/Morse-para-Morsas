@@ -17,13 +17,31 @@ const DATA = process.env.DATA_FILE || path.join(__dirname, 'data.json');
 const html = () => fs.readFileSync(path.join(__dirname, 'index.html'));
 
 // ---------- Datos que sobreviven a un reinicio: nombres, conexiones y salas ----------
-let db = { names: {}, links: [], rooms: {} };   // links: ["a|b"], rooms: { CODIGO: { host, members: [dev] } }
-try { db = Object.assign(db, JSON.parse(fs.readFileSync(DATA, 'utf8'))); } catch {}
-const save = () => { try { fs.writeFileSync(DATA, JSON.stringify(db)); } catch (e) { console.error('No pude guardar:', e.message); } };
+// names y rooms se indexan con texto que manda el cliente (ids, códigos): por eso son objetos SIN prototipo.
+// Con un objeto común, un código como "__proto__" o "constructor" encontraría propiedades heredadas.
+const dict = o => Object.assign(Object.create(null), o);
+let db = { names: dict(), links: [], rooms: dict() };   // links: ["a|b"], rooms: { CODIGO: { host, members: [dev] } }
+try {
+  const raw = JSON.parse(fs.readFileSync(DATA, 'utf8'));
+  // Se valida lo leído: un archivo editado a mano o dañado a medias no debe romper el servidor después.
+  for (const [d, n] of Object.entries(raw.names || {})) if (typeof n === 'string') db.names[d] = n;
+  db.links = (Array.isArray(raw.links) ? raw.links : []).filter(k => typeof k === 'string' && k.split('|').length === 2);
+  for (const [code, r] of Object.entries(raw.rooms || {}))
+    if (r && typeof r.host === 'string' && Array.isArray(r.members) && r.members.every(m => typeof m === 'string'))
+      db.rooms[code] = { host: r.host, members: r.members };
+} catch {}
+// Se guarda en un archivo temporal y se renombra: si el servidor se corta a mitad de la escritura, no queda a medias.
+const save = () => {
+  try { fs.writeFileSync(DATA + '.tmp', JSON.stringify(db)); fs.renameSync(DATA + '.tmp', DATA); }
+  catch (e) { console.error('No pude guardar:', e.message); }
+};
 
 const key = (a, b) => [a, b].sort().join('|');
 const isLinked = (a, b) => db.links.includes(key(a, b));
 const nameOf = d => db.names[d] || 'Dispositivo ' + d.slice(0, 4);
+// Sin caracteres de control ni de dirección de texto (que podrían disfrazar o desordenar el nombre).
+const cleanName = n => String(n == null ? '' : n)
+  .replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁠-⁩﻿]/g, '').trim().slice(0, 20);
 
 /** Un dispositivo solo puede estar en una conexión a la vez: con una persona O dentro de una sala. */
 const busy = dev => db.links.some(k => k.split('|').includes(dev)) ||
@@ -46,17 +64,38 @@ function neighbors(dev) {
 const PUBLIC = path.join(__dirname, 'public');
 const TYPES = { '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
 
-const server = http.createServer((req, res) => {
-  const file = path.join(PUBLIC, decodeURIComponent(new URL(req.url, 'http://x').pathname));
+function staticFile(url) {
+  let pathname;
+  try { pathname = decodeURIComponent(new URL(url, 'http://x').pathname); } catch { return null; }   // "%" suelto, etc.
+  const file = path.join(PUBLIC, pathname);
   const type = TYPES[path.extname(file)];
   // path.join + startsWith evita salir de public/ con rutas tipo "../"
-  if (type && file.startsWith(PUBLIC + path.sep) && fs.existsSync(file)) {
-    return res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'public, max-age=3600' }).end(fs.readFileSync(file));
+  try {
+    if (type && file.startsWith(PUBLIC + path.sep) && fs.statSync(file).isFile()) return { file, type };
+  } catch {}
+  return null;
+}
+
+const server = http.createServer((req, res) => {
+  try {
+    const s = staticFile(req.url);
+    if (s) return res.writeHead(200, { 'Content-Type': s.type, 'Cache-Control': 'public, max-age=3600' }).end(fs.readFileSync(s.file));
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(html());
+  } catch (e) {   // un pedido raro nunca debe tumbar el servidor
+    console.error('Error HTTP:', e.message);
+    if (!res.headersSent) res.writeHead(500);
+    res.end();
   }
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(html());
 });
 
-const wss = new WebSocketServer({ server, maxPayload: 4096 });
+// Solo se aceptan WebSockets de la propia página (mismo origen) o de la app, que no manda Origin.
+// Sin esto, cualquier sitio web abierto en un navegador de la red podría conectarse al servidor.
+const sameOrigin = ({ origin, req }) => {
+  if (!origin) return true;
+  try { return new URL(origin).host === req.headers.host; } catch { return false; }
+};
+
+const wss = new WebSocketServer({ server, maxPayload: 4096, verifyClient: sameOrigin });
 wss.on('error', () => {}); // ws reenvía los errores del server; los maneja server.on('error') más abajo
 
 const open = c => c.readyState === 1;
@@ -161,7 +200,7 @@ function handle(ws, o) {
   const dev = ws.dev;
   switch (o.t) {
     case 'name': {
-      const n = String(o.n || '').trim().slice(0, 20);
+      const n = cleanName(o.n);
       if (n && db.names[dev] !== n) { db.names[dev] = n; save(); broadcastState(); }
       break;
     }
@@ -194,11 +233,13 @@ function handle(ws, o) {
       const req = pending.get(String(o.id));
       if (!req || req.to !== dev) return;
       if (o.t === 'ignore') { req.ignored = true; broadcastState(); }   // el otro sigue esperando hasta que venza
-      else if (o.ok && (busy(req.from) || (req.kind === 'link' && busy(req.to)))) {
+      else if (o.ok === true && req.kind === 'join' && !db.rooms[req.code]) {
+        resolve(req, 'closed');   // la sala se cerró mientras la solicitud esperaba
+      } else if (o.ok === true && (busy(req.from) || (req.kind === 'link' && busy(req.to)))) {
         // Mientras esperaba, alguno de los dos se conectó con otro.
         fail(ws, 'No se pudo: alguno ya está conectado con otro');
         resolve(req, 'busy');
-      } else resolve(req, o.ok ? 'accepted' : 'rejected');
+      } else resolve(req, o.ok === true ? 'accepted' : 'rejected');   // "ok" tiene que ser exactamente true
       break;
     }
     case 'unlink': {
@@ -210,8 +251,10 @@ function handle(ws, o) {
       const code = String(o.code);
       const room = db.rooms[code];
       if (!room || !room.members.includes(dev)) return;
-      if (room.host === dev) delete db.rooms[code];   // si se va el anfitrión, la sala se cierra
-      else room.members = room.members.filter(m => m !== dev);
+      if (room.host === dev) {   // si se va el anfitrión, la sala se cierra
+        delete db.rooms[code];
+        for (const r of [...pending.values()]) if (r.kind === 'join' && r.code === code) resolve(r, 'closed');
+      } else room.members = room.members.filter(m => m !== dev);
       save(); broadcastState(); notify();
       break;
     }
@@ -236,21 +279,30 @@ wss.on('connection', (ws, req) => {
   ws.last = null;
   ws.alive = true;
   ws.on('pong', () => { ws.alive = true; });
+  // ws emite 'error' (frame inválido, mensaje demasiado grande...); sin este manejador Node tira el proceso.
+  ws.on('error', () => {});
   ws.on('message', raw => {
-    const m = String(raw);
-    if (m === '1') { pressing.add(ws); notify(); }
-    else if (m === '0') { pressing.delete(ws); notify(); }
-    else if (m[0] === '{') {
-      let o;
-      try { o = JSON.parse(m); } catch { return; }
-      if (o && typeof o === 'object') handle(ws, o);
+    try {
+      const m = String(raw);
+      if (m === '1') { pressing.add(ws); notify(); }
+      else if (m === '0') { pressing.delete(ws); notify(); }
+      else if (m[0] === '{') {
+        let o;
+        try { o = JSON.parse(m); } catch { return; }
+        if (o && typeof o === 'object' && typeof o.t === 'string') handle(ws, o);
+      }
+    } catch (e) {   // un mensaje raro nunca debe tumbar el servidor ni a los demás
+      console.error('Error al procesar un mensaje:', e);
     }
   });
   ws.on('close', () => {
     pressing.delete(ws);
-    if (!socketsOf(ws.dev).length)   // se fue del todo: sus solicitudes salientes ya no tienen sentido
-      for (const r of [...pending.values()])
-        if (r.from === ws.dev) { clearTimeout(r.timer); pending.delete(r.id); }
+    if (!socketsOf(ws.dev).length) {   // el dispositivo se fue del todo (ni página ni servicio)
+      for (const r of [...pending.values()]) {
+        if (r.from === ws.dev) { clearTimeout(r.timer); pending.delete(r.id); }   // su solicitud ya no tiene sentido
+        else if (r.to === ws.dev) resolve(r, 'offline');                          // avisarle ya a quien esperaba
+      }
+    }
     broadcastState();
     notify();
   });

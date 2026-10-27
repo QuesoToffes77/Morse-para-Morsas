@@ -340,28 +340,38 @@
     $('statusText').textContent = text;
   }
 
+  // Reconexión: 1 s, 2 s, 4 s, 8 s y después cada 10 s (no machacar al servidor ni la batería si está caído).
+  let retries = 0, retryTimer = null;
   function connect() {
-    ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/?d=' + deviceId);
-    ws.onopen = () => {
+    clearTimeout(retryTimer); retryTimer = null;
+    const sock = ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/?d=' + deviceId);
+    sock.onopen = () => {
+      retries = 0;
       setPill('ok', 'Conectado');
       if (name) tx({ t: 'name', n: name });
-      if (held) ws.send('1');
+      if (held) sock.send('1');
     };
-    ws.onmessage = e => {
+    sock.onmessage = e => {
       const m = e.data;
       if (m[0] !== '{') return setOthers(m === '1');
-      const o = JSON.parse(m);
+      let o;
+      try { o = JSON.parse(m); } catch { return; }
       if (o.t === 'state') {
         o.sent.forEach(s => { s.end = Date.now() + s.left; });
         st = o; renderStatus(); renderPanel();
       } else if (o.t === 'ev') showEvent(o);
     };
-    ws.onclose = () => {
+    sock.onclose = () => {
+      if (sock !== ws) return;   // un socket viejo que ya reemplazamos
       st = null; setPill('warn', 'Reconectando…'); setOthers(false); renderPanel();
-      setTimeout(connect, 1000);
+      retryTimer = setTimeout(connect, Math.min(10000, 1000 * 2 ** retries++));
     };
   }
   connect();
+  // Al volver a la app (p. ej. después de bloquear el celular) no esperar el reintento: reconectar ya.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && ws.readyState > 1) { retries = 0; connect(); }
+  });
 
   function renderStatus() {
     const link = st.links[0], room = st.rooms[0];
@@ -568,6 +578,8 @@
       rejected: [o.who + ' rechazó tu solicitud' + sala, 'bad'],
       expired: [o.who + ' no respondió' + sala, 'warn'],
       busy: ['No se pudo conectar con ' + o.who + ': ya está conectado con otro', 'warn'],
+      offline: [o.who + ' se desconectó' + sala, 'warn'],
+      closed: ['La sala ' + o.code + ' se cerró', 'warn'],
       error: [o.msg, 'bad'],
     }[o.k] || ['', ''];
     if (msg) toast(msg, kind);

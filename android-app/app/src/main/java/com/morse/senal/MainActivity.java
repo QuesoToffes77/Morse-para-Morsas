@@ -114,5 +114,6 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String getName() {
             return prefs.getString("name", "");
-        }    }
+        }
+    }
 }

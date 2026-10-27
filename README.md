@@ -53,12 +53,35 @@ Para recompilarlo hace falta JDK 17 y el SDK de Android; el proyecto está en [`
 - Los toques muy cortos se mantienen al menos 100 ms (luz y vibración) en el receptor para que se alcancen a sentir (`MIN_MS` en `index.html` y `MIN_VIBRATION_MS` en `SignalService.java`).
 - El servidor revisa cada 10 segundos que cada dispositivo siga conectado, para que uno dormido o sin wifi no deje la luz prendida.
 
+## Qué pasa cuando alguien se desconecta
+
+| Situación | Qué ocurre |
+| --- | --- |
+| Se corta el wifi o se cierra la app **con el botón apretado** | Para los demás la luz se apaga y la vibración para enseguida. |
+| Se cierra la pantalla pero queda el servicio en segundo plano | Sigue "en línea" y recibe la señal; es el uso normal con la app cerrada. |
+| Se desconecta tu pareja o un miembro de tu sala | La conexión se **conserva** y aparece "sin conexión". Al volver, todo sigue funcionando sin repetir nada. |
+| Se desconecta el anfitrión de una sala | La sala sigue entre sus miembros, pero nadie nuevo puede pedir entrar hasta que vuelva. |
+| Alguien se desconecta con una solicitud **enviada** | La solicitud se cancela y desaparece de la bandeja del otro. |
+| Alguien se desconecta con una solicitud **recibida** | Quien esperaba se entera enseguida ("se desconectó"), sin esperar los 20 s. |
+| El anfitrión cierra la sala con solicitudes de ingreso pendientes | Esas solicitudes se cancelan ("la sala se cerró"); nunca se "aceptan" una sala inexistente. |
+| Se cae el servidor | La página y la app reintentan solas (1, 2, 4, 8 y luego cada 10 s) y al volver recuperan conexiones y salas, que se guardan en `data.json`. |
+| Un celular se queda sin red sin avisar (se durmió, se alejó del wifi) | El servidor revisa cada 10 s y lo da de baja; no deja la luz de nadie prendida. |
+
+## Tests
+
+```bash
+npm test
+```
+
+Son 34 tests del servidor (usan el runner integrado de Node, no hace falta instalar nada más). Cada uno levanta su propio servidor en un puerto al azar y con un `data.json` temporal. Cubren la señal, las solicitudes (aceptar, rechazar, ignorar, vencer), las reglas de una sola conexión, las salas, todas las desconexiones de la tabla anterior, que los datos sobrevivan a un reinicio, y la robustez ante mensajes basura, mensajes enormes, ids raros, rutas HTTP maliciosas y WebSockets de otros sitios web.
+
 ## Archivos
 
 | Archivo | Qué es |
 | --- | --- |
 | `server.js` | Servidor HTTP + WebSocket |
 | `index.html` | La página (botón, luz, vibración) |
+| `test/` | Tests del servidor (`npm test`) |
 | `public/` | Logo e íconos (los sirve el servidor) |
 | `android-app/` | Proyecto de la app de Android |
 | `Senal.apk` | App ya compilada |

@@ -45,6 +45,7 @@ public class SignalService extends Service {
     private static final String CHANNEL_REQ = "solicitudes";
     private static final int NOTIF_ID = 1;
     private static final int MIN_VIBRATION_MS = 100;
+    private static final long REQUEST_NOTIFICATION_MS = 20_000;   // igual que lo que espera el servidor
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable reconnect = this::connect;
     private OkHttpClient client;
@@ -134,7 +135,7 @@ public class SignalService extends Service {
                 .setContentTitle("Señal activa")
                 .setContentText("Vibra cuando otro dispositivo aprieta")
                 .setColor(0xFF5865F2)
-                            .setContentIntent(open)
+                .setContentIntent(open)
                 .setOngoing(true)
                 .addAction(new Notification.Action.Builder(null, "Detener", stop).build())
                 .build();
@@ -188,6 +189,7 @@ public class SignalService extends Service {
                             .setColor(0xFF5865F2)
                             .setContentIntent(open)
                             .setAutoCancel(true)
+                            .setTimeoutAfter(REQUEST_NOTIFICATION_MS)   // la solicitud vence: la notificación también
                             .build());
         } catch (JSONException ignored) { }
     }
