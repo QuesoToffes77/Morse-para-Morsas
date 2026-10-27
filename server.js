@@ -18,9 +18,13 @@ wss.on('error', () => {}); // ws reenvía los errores del server; los maneja ser
 const pressing = new Set(); // sockets con el botón apretado
 
 // Manda a cada cliente si hay otro apretando; solo si cambió, para no mandar de más.
+// "Otro" = un dispositivo distinto: la página y el servicio de la app de un mismo celu comparten
+// identificador (?d=), así que su propio toque no los hace vibrar.
 function notify() {
+  const devs = new Map(); // dispositivo -> cuántos sockets suyos están apretando
+  for (const p of pressing) devs.set(p.dev, (devs.get(p.dev) || 0) + 1);
   for (const c of wss.clients) {
-    const others = pressing.size - (pressing.has(c) ? 1 : 0) > 0 ? '1' : '0';
+    const others = devs.size - (devs.has(c.dev) ? 1 : 0) > 0 ? '1' : '0';
     if (c.last !== others && c.readyState === 1) { c.last = others; c.send(others); }
   }
 }
@@ -35,7 +39,8 @@ setInterval(() => {
   }
 }, 10000).unref();
 
-wss.on('connection', ws => {
+wss.on('connection', (ws, req) => {
+  ws.dev = new URL(req.url, 'http://x').searchParams.get('d') || Math.random().toString(36);
   ws.last = null;
   ws.alive = true;
   ws.on('pong', () => { ws.alive = true; });

@@ -57,8 +57,10 @@
   }
 
   // En la app Android se usa la vibración nativa (AndroidBridge); en el navegador, navigator.vibrate.
-  const vib = ms => window.AndroidBridge ? (ms ? AndroidBridge.vibrate(ms) : AndroidBridge.cancel())
-                                         : navigator.vibrate && navigator.vibrate(ms);
+  // En la app nueva (con deviceId) vibra el servicio nativo, así también funciona con la app cerrada.
+  const inApp = !!(window.AndroidBridge && AndroidBridge.deviceId);
+  const vib = ms => { if (!inApp) navigator.vibrate && navigator.vibrate(ms); };
+  const deviceId = inApp ? AndroidBridge.deviceId() : Math.random().toString(36).slice(2);
 
   function render() {
     lamp.classList.toggle('on', held || others);
@@ -71,7 +73,7 @@
   }
 
   function connect() {
-    ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+    ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/?d=' + deviceId);
     ws.onopen = () => { status.textContent = 'conectado'; if (held) ws.send('1'); };
     ws.onmessage = e => setOthers(e.data === '1');
     ws.onclose = () => { status.textContent = 'reconectando…'; setOthers(false); setTimeout(connect, 1000); };
