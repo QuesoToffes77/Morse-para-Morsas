@@ -40,7 +40,10 @@ public class SignalService extends Service {
 
     private static final String CHANNEL = "senal";
     private static final int NOTIF_ID = 1;
-    private static final int MIN_VIBRATION_MS = 60;
+    private static final int MIN_VIBRATION_MS = 100;
+
+    /** Instancia viva, para que la actividad (mismo proceso) le avise del toque propio. */
+    static volatile SignalService instance;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable reconnect = this::connect;
@@ -51,6 +54,7 @@ public class SignalService extends Service {
     private ConnectivityManager.NetworkCallback netCallback;
     private SharedPreferences prefs;
     private int attempt = 0;
+    private boolean selfHeld = false, othersOn = false;
     private boolean vibrating = false;
     private long vibratingSince;
     private Runnable pendingStop;
@@ -69,6 +73,7 @@ public class SignalService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         prefs = getSharedPreferences("senal", MODE_PRIVATE);
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
         client = new OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build();
@@ -110,7 +115,7 @@ public class SignalService extends Service {
             WebSocket old = socket;
             socket = null;
             old.cancel();
-            stopVibration();
+            onSignal(false);
         }
         if (socket == null) {
             attempt = 0;
@@ -158,13 +163,25 @@ public class SignalService extends Service {
         main.post(() -> {
             if (ws != socket) return;          // conexión vieja, ya reemplazada
             socket = null;
-            stopVibration();
+            onSignal(false);
             long delay = Math.min(60_000L, 2_000L << Math.min(attempt++, 5));   // 2 s ... 60 s
             main.postDelayed(reconnect, delay);
         });
     }
 
+    /** Lo llama la página cuando este mismo celu aprieta o suelta su botón: también vibra (feedback propio). */
+    void setSelf(boolean on) {
+        main.post(() -> { selfHeld = on; update(); });
+    }
+
     private void onSignal(boolean on) {
+        othersOn = on;
+        update();
+    }
+
+    /** Vibra mientras aprieta este celu u otro; un toque corto se mantiene un mínimo para que se sienta. */
+    private void update() {
+        boolean on = selfHeld || othersOn;
         if (on) {
             if (pendingStop != null) { main.removeCallbacks(pendingStop); pendingStop = null; }
             if (!vibrating) {
@@ -175,7 +192,6 @@ public class SignalService extends Service {
                         new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build());
             }
         } else if (vibrating && pendingStop == null) {
-            // Un toque corto llega como 1 y 0 casi juntos: se mantiene un mínimo para que se sienta.
             long wait = Math.max(0, MIN_VIBRATION_MS - (System.currentTimeMillis() - vibratingSince));
             pendingStop = () -> { pendingStop = null; stopVibration(); };
             main.postDelayed(pendingStop, wait);
@@ -190,6 +206,7 @@ public class SignalService extends Service {
 
     @Override
     public void onDestroy() {
+        instance = null;
         cm.unregisterNetworkCallback(netCallback);
         main.removeCallbacksAndMessages(null);
         stopVibration();

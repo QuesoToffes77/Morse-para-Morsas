@@ -103,5 +103,12 @@ public class MainActivity extends Activity {
         public String deviceId() {
             return SignalService.deviceId(MainActivity.this);
         }
+
+        /** Este celu aprieta/suelta su botón: el servicio vibra (así se maneja un solo vibrador y el mínimo de 100 ms). */
+        @JavascriptInterface
+        public void setSelf(boolean on) {
+            SignalService svc = SignalService.instance;
+            if (svc != null) svc.setSelf(on);
+        }
     }
 }

@@ -38,9 +38,9 @@ Para recompilarlo hace falta JDK 17 y el SDK de Android; el proyecto está en [`
 
 - El celular y el servidor hablan por un WebSocket y se mandan un solo carácter: `1` (apretado) o `0` (soltado).
 - El servidor responde a cada dispositivo `1` si hay **otro** dispositivo apretando, y `0` si no. Solo manda cuando el valor cambia.
-- La luz se prende si apretás vos o si hay otro apretando. La vibración es solo cuando aprieta otro.
-- "Otro" significa otro dispositivo: la página y el servicio de un mismo celular comparten identificador (`?d=`), así que tu propio toque no te hace vibrar.
-- Los toques muy cortos se mantienen al menos 60 ms en el receptor para que se alcancen a sentir (`MIN_MS` en `index.html`).
+- La luz se prende si apretás vos o si hay otro apretando. El celular vibra mientras apretás vos o aprieta otro.
+- "Otro" significa otro dispositivo: la página y el servicio de un mismo celular comparten identificador (`?d=`), así que el servidor no te avisa de tu propio toque (la vibración propia la dispara la app localmente).
+- Los toques muy cortos se mantienen al menos 100 ms (luz y vibración) para que se alcancen a sentir (`MIN_MS` en `index.html` y `MIN_VIBRATION_MS` en `SignalService.java`).
 - El servidor revisa cada 10 segundos que cada dispositivo siga conectado, para que uno dormido o sin wifi no deje la luz prendida.
 
 ## Archivos
