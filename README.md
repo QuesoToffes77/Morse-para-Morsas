@@ -1,6 +1,16 @@
 # Morse para Morsas
 
-Una página con un botón en el medio. Mientras alguien lo mantiene apretado, se prende una luz roja arriba en todos los demás dispositivos de la red, y los celulares vibran. Cuando todos lo sueltan, la luz se apaga.
+Una página con un botón en el medio. Mientras alguien lo mantiene apretado, se prende una luz roja arriba en los dispositivos **conectados con esa persona**, y los celulares vibran. Cuando todos lo sueltan, la luz se apaga.
+
+## Conexiones y salas
+
+La señal solo llega entre dispositivos conectados. Abajo hay un botón **Conexión** que abre un panel con tres pestañas:
+
+- **Personas:** todos los que tienen la app abierta o en segundo plano. Con **Conectar** les mandás una solicitud; el botón dice "Conectando… 20 s" mientras esperás. Abajo ves tus conexiones y podés desconectarte.
+- **Salas:** **Crear sala** te da un código de 4 letras; el resto se une con **Unirme** y ese código. Quien crea la sala es el anfitrión y decide quién entra. Todos los miembros de una sala se ven entre sí. Si el anfitrión cierra la sala, se disuelve.
+- **Solicitudes** (a la derecha): lo que te mandaron, con **Aceptar**, **Rechazar** o **Ignorar**. Si no respondés (o ignorás), a quien la mandó le vence a los 20 segundos y ve "no respondió". Si la app está cerrada, te llega una notificación.
+
+La primera vez te pide un nombre (es lo que ven los demás). Las conexiones, salas y nombres se guardan en `data.json` junto al servidor, así sobreviven a un reinicio.
 
 ## Cómo usarlo
 
@@ -36,8 +46,8 @@ Para recompilarlo hace falta JDK 17 y el SDK de Android; el proyecto está en [`
 
 ## Cómo funciona
 
-- El celular y el servidor hablan por un WebSocket y se mandan un solo carácter: `1` (apretado) o `0` (soltado).
-- El servidor responde a cada dispositivo `1` si hay **otro** dispositivo apretando, y `0` si no. Solo manda cuando el valor cambia.
+- El celular y el servidor hablan por un WebSocket. La señal es un solo carácter: `1` (apretado) o `0` (soltado). Las conexiones y salas se manejan con mensajes JSON por el mismo WebSocket.
+- El servidor responde a cada dispositivo `1` si hay otro dispositivo **conectado con él** apretando, y `0` si no. Solo manda cuando el valor cambia.
 - La luz se prende si apretás vos o si hay otro apretando. La vibración es solo cuando aprieta otro: nadie se vibra a sí mismo.
 - "Otro" significa otro dispositivo: la página y el servicio de un mismo celular comparten identificador (`?d=`), así que el servidor no te avisa de tu propio toque.
 - Los toques muy cortos se mantienen al menos 100 ms (luz y vibración) en el receptor para que se alcancen a sentir (`MIN_MS` en `index.html` y `MIN_VIBRATION_MS` en `SignalService.java`).

@@ -102,5 +102,16 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String deviceId() {
             return SignalService.deviceId(MainActivity.this);
+        }
+
+        /** El nombre lo elige la persona en la página; el servicio lo necesita para presentarse al servidor. */
+        @JavascriptInterface
+        public void setName(String n) {
+            prefs.edit().putString("name", n).apply();
+        }
+
+        @JavascriptInterface
+        public String getName() {
+            return prefs.getString("name", "");
         }    }
 }

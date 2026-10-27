@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>Señal</title>
 <style>
-  :root { --bg:#14161a; --fg:#e8eaed; --btn:#2a2f38; --red:#ff2b2b; }
-  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; }
+  :root { --bg:#14161a; --fg:#e8eaed; --btn:#2a2f38; --red:#ff2b2b; --card:#1f232a; --acc:#4da3ff; --ok:#3ecf8e; --mute:#8b929c; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body { height:100%; margin:0; }
   body { background:var(--bg); color:var(--fg); font-family:system-ui,sans-serif;
-         display:flex; flex-direction:column; align-items:center; }
-  .top { padding-top:8vh; text-align:center; }
+         display:flex; flex-direction:column; align-items:center; user-select:none; }
+  .top { padding-top:6vh; text-align:center; }
   .lamp { width:90px; height:90px; border-radius:50%; background:#3a1414; border:4px solid #555;
           transition:background .05s, box-shadow .05s; margin:0 auto; }
   .lamp.on { background:var(--red); box-shadow:0 0 40px 18px rgba(255,43,43,.7); border-color:#ff8a8a; }
@@ -21,6 +21,48 @@
          display:flex; align-items:center; justify-content:center; transition:transform .05s, box-shadow .05s; }
   .btn.down { transform:translateY(6px); box-shadow:0 2px 0 #111, 0 4px 10px rgba(0,0,0,.5); background:#353b46; }
   .btn svg { width:90px; height:90px; fill:none; stroke:var(--fg); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .bottom { padding:12px 16px calc(18px + env(safe-area-inset-bottom)); }
+  .conn { background:var(--card); color:var(--fg); border:1px solid #333a44; border-radius:24px; padding:12px 28px;
+          font-size:16px; cursor:pointer; position:relative; }
+  .badge { background:var(--red); color:#fff; border-radius:10px; font-size:12px; padding:1px 7px; margin-left:6px; }
+  .badge[hidden] { display:none; }
+
+  /* Panel de conexión */
+  .sheet { position:fixed; inset:0; background:var(--bg); display:flex; flex-direction:column; z-index:10; }
+  .sheet[hidden] { display:none; }
+  .shead { display:flex; align-items:center; justify-content:space-between; padding:14px 16px 6px; }
+  .shead h2 { margin:0; font-size:18px; }
+  .me { font-size:13px; color:var(--mute); cursor:pointer; }
+  .x { background:none; border:none; color:var(--fg); font-size:26px; cursor:pointer; padding:0 4px; }
+  .tabs { display:flex; border-bottom:1px solid #2a2f38; }
+  .tab { flex:1; background:none; border:none; color:var(--mute); padding:12px 4px; font-size:15px; cursor:pointer;
+         border-bottom:2px solid transparent; }
+  .tab.act { color:var(--fg); border-bottom-color:var(--acc); }
+  .pbody { flex:1; overflow-y:auto; padding:8px 16px 24px; }
+  .pbody h3 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--mute); margin:18px 0 8px; }
+  .row { background:var(--card); border-radius:12px; padding:12px 14px; margin-bottom:8px; display:flex;
+         align-items:center; justify-content:space-between; gap:10px; }
+  .row .nm { min-width:0; overflow-wrap:anywhere; }
+  .row .sub { font-size:12px; color:var(--mute); margin-top:2px; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#555; margin-right:8px; }
+  .dot.on { background:var(--ok); }
+  .acts { display:flex; gap:6px; flex-shrink:0; }
+  .b { background:var(--acc); color:#06121f; border:none; border-radius:8px; padding:8px 12px; font-size:14px; cursor:pointer; }
+  .b.sec { background:#333a44; color:var(--fg); }
+  .b.bad { background:#5a2326; color:#ffd6d6; }
+  .b:disabled { opacity:.6; cursor:default; }
+  .empty { color:var(--mute); font-size:14px; padding:6px 2px; }
+  .code { font-size:26px; letter-spacing:.2em; font-weight:700; }
+  .joinbox { display:flex; gap:8px; }
+  .joinbox input, .modal input { flex:1; min-width:0; background:var(--card); color:var(--fg); border:1px solid #333a44;
+         border-radius:8px; padding:10px 12px; font-size:18px; letter-spacing:.15em; text-transform:uppercase; user-select:text; }
+  .modal input { letter-spacing:normal; text-transform:none; font-size:16px; width:100%; margin:14px 0; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.7); display:flex; align-items:center; justify-content:center; z-index:20; padding:20px; }
+  .modal[hidden] { display:none; }
+  .modal .box { background:var(--card); border-radius:14px; padding:20px; width:100%; max-width:340px; }
+  .toast { position:fixed; left:50%; bottom:90px; transform:translateX(-50%); background:#333a44; color:var(--fg);
+           padding:10px 16px; border-radius:10px; font-size:14px; z-index:30; max-width:90%; text-align:center; }
+  .toast[hidden] { display:none; }
 </style>
 </head>
 <body>
@@ -34,11 +76,39 @@
       <svg viewBox="0 0 24 24"><path d="M9 11V5a1.5 1.5 0 0 1 3 0v5.5l4.2.9a2 2 0 0 1 1.6 2.2l-.6 4.3a3 3 0 0 1-3 2.6H11a3 3 0 0 1-2.3-1.1L5.5 14.7a1.5 1.5 0 0 1 2.2-2L9 14"/></svg>
     </button>
   </div>
+  <div class="bottom">
+    <button id="open" class="conn">Conexión<span id="badge" class="badge" hidden></span></button>
+  </div>
+
+  <div id="sheet" class="sheet" hidden>
+    <div class="shead">
+      <div><h2>Conexión</h2><div id="me" class="me"></div></div>
+      <button id="close" class="x" aria-label="Cerrar">×</button>
+    </div>
+    <div class="tabs">
+      <button class="tab act" data-tab="people">Personas</button>
+      <button class="tab" data-tab="rooms">Salas</button>
+      <button class="tab" data-tab="req">Solicitudes<span id="tbadge" class="badge" hidden></span></button>
+    </div>
+    <div id="pbody" class="pbody"></div>
+  </div>
+
+  <div id="modal" class="modal" hidden>
+    <div class="box">
+      <div>¿Cómo te llamás? Es lo que ven los demás.</div>
+      <input id="nameIn" maxlength="20" placeholder="Tu nombre" autocomplete="off">
+      <button id="nameOk" class="b">Guardar</button>
+    </div>
+  </div>
+  <div id="toast" class="toast" hidden></div>
 
 <script>
-  const lamp = document.getElementById('lamp');
-  const status = document.getElementById('status');
-  const btn = document.getElementById('btn');
+  const $ = id => document.getElementById(id);
+  const lamp = $('lamp'), status = $('status'), btn = $('btn');
+  const store = {
+    get: k => { try { return localStorage.getItem(k); } catch { return null; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+  };
 
   let held = false, others = false, ws, vibTimer = null;
 
@@ -56,10 +126,10 @@
     render();
   }
 
-  // En la app Android se usa la vibración nativa (AndroidBridge); en el navegador, navigator.vibrate.
   // En la app nueva (con deviceId) vibra el servicio nativo, así también funciona con la app cerrada.
   const inApp = !!(window.AndroidBridge && AndroidBridge.deviceId);
-  const deviceId = inApp ? AndroidBridge.deviceId() : Math.random().toString(36).slice(2);
+  const deviceId = inApp ? AndroidBridge.deviceId() : (store.get('dev') || Math.random().toString(36).slice(2));
+  if (!inApp) store.set('dev', deviceId);
 
   // Solo en el navegador (en la app vibra el servicio): vibra mientras aprieta OTRO dispositivo, nunca por
   // el toque propio; un toque corto se mantiene un mínimo para que se sienta.
@@ -86,14 +156,44 @@
     if (!inApp) updateVib();
   }
 
+  // ---------- Conexión con el servidor ----------
+  let st = null;   // último estado enviado por el servidor (personas, conexiones, salas, solicitudes)
+  let name = store.get('name') || (inApp && AndroidBridge.getName ? AndroidBridge.getName() : '') || '';
+
+  const tx = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+
   function connect() {
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/?d=' + deviceId);
-    ws.onopen = () => { status.textContent = 'conectado'; if (held) ws.send('1'); };
-    ws.onmessage = e => setOthers(e.data === '1');
-    ws.onclose = () => { status.textContent = 'reconectando…'; setOthers(false); setTimeout(connect, 1000); };
+    ws.onopen = () => {
+      if (name) tx({ t: 'name', n: name });
+      if (held) ws.send('1');
+    };
+    ws.onmessage = e => {
+      const m = e.data;
+      if (m[0] !== '{') return setOthers(m === '1');
+      const o = JSON.parse(m);
+      if (o.t === 'state') {
+        o.sent.forEach(s => { s.end = Date.now() + s.left; });
+        st = o; renderStatus(); renderPanel();
+      } else if (o.t === 'ev') showEvent(o);
+    };
+    ws.onclose = () => {
+      st = null; status.textContent = 'reconectando…'; setOthers(false); renderPanel();
+      setTimeout(connect, 1000);
+    };
   }
   connect();
 
+  function renderStatus() {
+    const n = st.links.length + st.rooms.length;
+    status.textContent = n ? 'conectado · ' + st.links.length + (st.links.length === 1 ? ' persona' : ' personas')
+                             + (st.rooms.length ? ' · ' + st.rooms.length + (st.rooms.length === 1 ? ' sala' : ' salas') : '')
+                           : 'sin conexiones: tocá "Conexión"';
+    const k = st.inbox.length;
+    for (const b of [$('badge'), $('tbadge')]) { b.hidden = !k; b.textContent = k; }
+  }
+
+  // ---------- Botón ----------
   function send(down) {
     if (held === down) return;
     held = down;
@@ -104,11 +204,138 @@
   btn.addEventListener('pointerdown', e => { btn.setPointerCapture(e.pointerId); send(true); });
   ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => btn.addEventListener(t, () => send(false)));
   btn.addEventListener('contextmenu', e => e.preventDefault());
-  addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat) { e.preventDefault(); send(true); } });
+  addEventListener('keydown', e => {
+    if (e.code === 'Space' && !e.repeat && !/INPUT/.test(document.activeElement.tagName)) { e.preventDefault(); send(true); }
+  });
   addEventListener('keyup', e => { if (e.code === 'Space') send(false); });
   // Si la app pierde el foco con el botón apretado, no llega el "soltar": lo soltamos nosotros.
   addEventListener('blur', () => send(false));
   document.addEventListener('visibilitychange', () => { if (document.hidden) send(false); });
+
+  // ---------- Nombre ----------
+  function askName() {
+    $('nameIn').value = name;
+    $('modal').hidden = false;
+    $('nameIn').focus();
+  }
+  function saveName() {
+    const n = $('nameIn').value.trim().slice(0, 20);
+    if (!n) return;
+    name = n; store.set('name', n);
+    if (inApp && AndroidBridge.setName) AndroidBridge.setName(n);
+    $('modal').hidden = true;
+    tx({ t: 'name', n });
+  }
+  $('nameOk').onclick = saveName;
+  $('nameIn').addEventListener('keydown', e => { if (e.key === 'Enter') saveName(); });
+  if (!name) askName();
+  else if (inApp && AndroidBridge.setName) AndroidBridge.setName(name);   // que el servicio lo conozca
+
+  // ---------- Panel de conexión ----------
+  // Los nombres vienen de otros dispositivos: siempre se insertan como texto, nunca como HTML.
+  function el(tag, attrs, ...kids) {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (k === 'class') e.className = v;
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+      else e.setAttribute(k, v);
+    }
+    for (const c of kids.flat()) if (c != null) e.append(c);
+    return e;
+  }
+  const secs = end => Math.max(0, Math.ceil((end - Date.now()) / 1000)) + ' s';
+  const countdown = s => el('span', { 'data-end': s.end }, secs(s.end));
+  const row = (main, ...acts) => el('div', { class: 'row' }, main, el('div', { class: 'acts' }, acts));
+  const who = (n, sub, online) => el('div', { class: 'nm' },
+    online === undefined ? null : el('span', { class: 'dot' + (online ? ' on' : '') }), n,
+    sub ? el('div', { class: 'sub' }, sub) : null);
+
+  let tab = 'people', joinCode = '';
+
+  function peopleView() {
+    const out = [el('h3', {}, 'Conectados ahora')];
+    if (!st.online.length) out.push(el('div', { class: 'empty' }, 'No hay nadie más conectado. Abrí la app en otro dispositivo.'));
+    for (const p of st.online) {
+      const s = st.sent.find(x => x.kind === 'link' && x.to === p.d);
+      out.push(row(who(p.n, null, true),
+        p.linked ? el('span', { class: 'sub' }, 'Conectado ✓')
+        : s ? el('button', { class: 'b', disabled: '' }, 'Conectando… ', countdown(s))
+        : el('button', { class: 'b', onclick: () => tx({ t: 'link', to: p.d }) }, 'Conectar')));
+    }
+    out.push(el('h3', {}, 'Mis conexiones'));
+    if (!st.links.length) out.push(el('div', { class: 'empty' }, 'Todavía no estás conectado con nadie.'));
+    for (const l of st.links)
+      out.push(row(who(l.n, l.online ? 'en línea' : 'sin conexión', l.online),
+        el('button', { class: 'b bad', onclick: () => tx({ t: 'unlink', d: l.d }) }, 'Desconectar')));
+    return out;
+  }
+
+  function roomsView() {
+    const out = [el('h3', {}, 'Crear una sala'),
+      el('button', { class: 'b', onclick: () => tx({ t: 'create' }) }, 'Crear sala'),
+      el('h3', {}, 'Unirse a una sala'),
+      el('div', { class: 'joinbox' },
+        el('input', { id: 'joincode', maxlength: '4', placeholder: 'CÓDIGO', autocomplete: 'off',
+                      oninput: e => { joinCode = e.target.value.toUpperCase(); } }),
+        el('button', { class: 'b', onclick: () => { if (joinCode.length === 4) tx({ t: 'join', code: joinCode }); } }, 'Unirme'))];
+    for (const s of st.sent.filter(x => x.kind === 'join'))
+      out.push(row(who('Sala ' + s.code, 'Esperando que te acepten'), el('button', { class: 'b', disabled: '' }, 'Conectando… ', countdown(s))));
+    out.push(el('h3', {}, 'Mis salas'));
+    if (!st.rooms.length) out.push(el('div', { class: 'empty' }, 'No estás en ninguna sala.'));
+    for (const r of st.rooms)
+      out.push(el('div', { class: 'row' },
+        el('div', { class: 'nm' },
+          el('div', { class: 'code' }, r.code),
+          el('div', { class: 'sub' }, (r.host ? 'Sos el anfitrión' : 'Anfitrión: ' + r.hostName)),
+          el('div', { class: 'sub' }, r.members.map(m => m.n + (m.me ? ' (vos)' : '') + (m.online ? '' : ' · sin conexión')).join(', '))),
+        el('button', { class: 'b bad', onclick: () => tx({ t: 'leave', code: r.code }) }, r.host ? 'Cerrar' : 'Salir')));
+    return out;
+  }
+
+  function reqView() {
+    if (!st.inbox.length) return [el('div', { class: 'empty' }, 'No tenés solicitudes.')];
+    return st.inbox.map(r => row(
+      who(r.from, r.kind === 'join' ? 'quiere unirse a tu sala ' + r.code : 'quiere conectarse con vos'),
+      el('button', { class: 'b', onclick: () => tx({ t: 'answer', id: r.id, ok: true }) }, 'Aceptar'),
+      el('button', { class: 'b bad', onclick: () => tx({ t: 'answer', id: r.id, ok: false }) }, 'Rechazar'),
+      el('button', { class: 'b sec', onclick: () => tx({ t: 'ignore', id: r.id }) }, 'Ignorar')));
+  }
+
+  function renderPanel() {
+    if ($('sheet').hidden) return;
+    $('me').textContent = name ? 'Vos: ' + name + ' ✎' : '';
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('act', t.dataset.tab === tab));
+    const body = $('pbody');
+    if (!st) { body.replaceChildren(el('div', { class: 'empty' }, 'Sin conexión con el servidor…')); return; }
+    const typing = document.activeElement && document.activeElement.id === 'joincode';
+    body.replaceChildren(...{ people: peopleView, rooms: roomsView, req: reqView }[tab]());
+    const inp = $('joincode');
+    if (inp) { inp.value = joinCode; if (typing) inp.focus(); }
+  }
+
+  document.querySelectorAll('.tab').forEach(t => t.onclick = () => { tab = t.dataset.tab; renderPanel(); });
+  $('open').onclick = () => { $('sheet').hidden = false; renderPanel(); };
+  $('close').onclick = () => { $('sheet').hidden = true; };
+  $('me').onclick = askName;
+  // Cuenta regresiva de las solicitudes enviadas, sin rehacer el panel (así no se pierde lo que se escribe).
+  setInterval(() => document.querySelectorAll('[data-end]').forEach(e => { e.textContent = secs(+e.dataset.end); }), 500);
+
+  let toastTimer;
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg; t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 4000);
+  }
+  function showEvent(o) {
+    const sala = o.kind === 'join' ? ' (sala ' + o.code + ')' : '';
+    toast({
+      accepted: o.who + ' aceptó tu solicitud' + sala,
+      rejected: o.who + ' rechazó tu solicitud' + sala,
+      expired: o.who + ' no respondió' + sala,
+      error: o.msg,
+    }[o.k] || '');
+  }
 </script>
 </body>
 </html>

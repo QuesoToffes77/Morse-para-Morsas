@@ -19,6 +19,9 @@ import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -39,6 +42,7 @@ public class SignalService extends Service {
     static final String ACTION_RECONNECT = "com.morse.senal.RECONNECT";
 
     private static final String CHANNEL = "senal";
+    private static final String CHANNEL_REQ = "solicitudes";
     private static final int NOTIF_ID = 1;
     private static final int MIN_VIBRATION_MS = 100;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -76,6 +80,8 @@ public class SignalService extends Service {
                 NotificationManager.IMPORTANCE_LOW);
         ch.setShowBadge(false);
         getSystemService(NotificationManager.class).createNotificationChannel(ch);
+        getSystemService(NotificationManager.class).createNotificationChannel(
+                new NotificationChannel(CHANNEL_REQ, "Solicitudes de conexión", NotificationManager.IMPORTANCE_DEFAULT));
 
         // Reintenta enseguida cuando vuelve la red, en vez de seguir esperando el backoff.
         cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -139,18 +145,49 @@ public class SignalService extends Service {
         String base = prefs.getString("url", DEFAULT_URL).replaceFirst("^http", "ws");
         Request req;
         try {
-            req = new Request.Builder().url(base + "/?d=" + deviceId(this)).build();
+            // s=1: es el servicio, que no necesita el estado completo de la pantalla de conexión.
+            req = new Request.Builder().url(base + "/?s=1&d=" + deviceId(this)).build();
         } catch (IllegalArgumentException e) {      // dirección mal escrita: no reintentar en bucle
             return;
         }
         socket = client.newWebSocket(req, new WebSocketListener() {
-            @Override public void onOpen(WebSocket ws, Response r) { attempt = 0; }
+            @Override public void onOpen(WebSocket ws, Response r) {
+                attempt = 0;
+                // Con la app cerrada igual aparece en la lista de conectados con su nombre.
+                String name = prefs.getString("name", "");
+                try {
+                    if (!name.isEmpty()) ws.send(new JSONObject().put("t", "name").put("n", name).toString());
+                } catch (JSONException ignored) { }
+            }
             @Override public void onMessage(WebSocket ws, String text) {
+                if (text.startsWith("{")) { onControl(text); return; }
                 main.post(() -> { if (ws == socket) onSignal("1".equals(text)); });
             }
             @Override public void onClosed(WebSocket ws, int code, String reason) { lost(ws); }
             @Override public void onFailure(WebSocket ws, Throwable t, Response r) { lost(ws); }
         });
+    }
+
+    /** Solicitud de conexión recibida con la app cerrada: se muestra como notificación. */
+    private void onControl(String text) {
+        try {
+            JSONObject o = new JSONObject(text);
+            if (!"req".equals(o.optString("t"))) return;
+            String from = o.optString("from");
+            String msg = "join".equals(o.optString("kind"))
+                    ? from + " quiere unirse a tu sala " + o.optString("code")
+                    : from + " quiere conectarse con vos";
+            PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class),
+                    PendingIntent.FLAG_IMMUTABLE);
+            getSystemService(NotificationManager.class).notify((int) (System.nanoTime() & 0x7fffffff),
+                    new Notification.Builder(this, CHANNEL_REQ)
+                            .setSmallIcon(android.R.drawable.ic_dialog_info)
+                            .setContentTitle("Solicitud de conexión")
+                            .setContentText(msg)
+                            .setContentIntent(open)
+                            .setAutoCancel(true)
+                            .build());
+        } catch (JSONException ignored) { }
     }
 
     private void lost(WebSocket ws) {
