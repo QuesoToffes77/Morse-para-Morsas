@@ -42,7 +42,17 @@ function neighbors(dev) {
 }
 
 // ---------- Servidor HTTP + WebSocket ----------
+// Archivos estáticos (logo, íconos) desde public/; cualquier otra ruta devuelve la página.
+const PUBLIC = path.join(__dirname, 'public');
+const TYPES = { '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
+
 const server = http.createServer((req, res) => {
+  const file = path.join(PUBLIC, decodeURIComponent(new URL(req.url, 'http://x').pathname));
+  const type = TYPES[path.extname(file)];
+  // path.join + startsWith evita salir de public/ con rutas tipo "../"
+  if (type && file.startsWith(PUBLIC + path.sep) && fs.existsSync(file)) {
+    return res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'public, max-age=3600' }).end(fs.readFileSync(file));
+  }
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(html());
 });
 

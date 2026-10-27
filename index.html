@@ -4,8 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#1e1f22">
-<title>Señal</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%235865f2'/%3E%3Ccircle cx='10' cy='22' r='2.6' fill='white'/%3E%3Cpath d='M10 14a8 8 0 0 1 8 8M10 8a14 14 0 0 1 14 14' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+<title>Morse</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/favicon-64.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <style>
   :root {
     color-scheme: dark;
@@ -31,7 +33,7 @@
             padding:max(10px, env(safe-area-inset-top)) 16px 10px; background:var(--bg2);
             box-shadow:0 1px 0 var(--line), 0 1px 2px rgba(0,0,0,.2); position:relative; z-index:2; }
   .brand { display:flex; align-items:center; gap:10px; font-weight:700; font-size:18px; color:var(--strong); letter-spacing:-.01em; }
-  .brand svg { width:32px; height:32px; display:block; }
+  .brand img { width:36px; height:36px; display:block; border-radius:10px; }
   .chip { display:flex; align-items:center; gap:8px; background:var(--bg1); border:0; border-radius:20px;
           padding:4px 12px 4px 4px; max-width:50vw; color:var(--strong); font-weight:600; font-size:14px; }
   .chip:hover { background:var(--bg0); }
@@ -143,6 +145,7 @@
   .field { flex:1; min-width:0; background:var(--bg0); color:var(--strong); border:1px solid transparent; border-radius:6px;
            padding:10px 12px; font:inherit; font-size:16px; user-select:text; }
   .field:focus { outline:none; border-color:var(--blurple); }
+  .mbody .field { width:100%; }
   .codein { letter-spacing:.35em; text-transform:uppercase; font-weight:700; font-family:ui-monospace,Consolas,monospace; text-align:center; }
   .room { display:flex; flex-direction:column; gap:12px; }
   .room .rh { display:flex; align-items:center; gap:12px; }
@@ -189,8 +192,8 @@
 <body>
   <header class="appbar">
     <div class="brand">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#5865f2"/><circle cx="10" cy="22" r="2.6" fill="#fff"/><path d="M10 14a8 8 0 0 1 8 8M10 8a14 14 0 0 1 14 14" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>
-      <span>Señal</span>
+      <img src="/icon-192.png" alt="" width="36" height="36">
+      <span>Morse</span>
     </div>
     <button id="meChip" class="chip" aria-label="Tu perfil"><span id="meAv"></span><span id="meName" class="t"></span></button>
   </header>

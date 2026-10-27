@@ -59,6 +59,7 @@ Para recompilarlo hace falta JDK 17 y el SDK de Android; el proyecto está en [`
 | --- | --- |
 | `server.js` | Servidor HTTP + WebSocket |
 | `index.html` | La página (botón, luz, vibración) |
+| `public/` | Logo e íconos (los sirve el servidor) |
 | `android-app/` | Proyecto de la app de Android |
 | `Senal.apk` | App ya compilada |
 
