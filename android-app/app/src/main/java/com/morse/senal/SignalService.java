@@ -22,6 +22,8 @@ import android.os.Vibrator;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -44,6 +46,8 @@ public class SignalService extends Service {
     private static final String CHANNEL = "senal";
     private static final String CHANNEL_REQ = "solicitudes";
     private static final int NOTIF_ID = 1;
+    private static final int NOTIF_NEED_CODE = 2;
+    private static final int CLOSE_NEED_CODE = 4001;   // el servidor pide (o rechaza) el código de acceso
     private static final int MIN_VIBRATION_MS = 100;
     private static final long REQUEST_NOTIFICATION_MS = 20_000;   // igual que lo que espera el servidor
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -64,7 +68,8 @@ public class SignalService extends Service {
         SharedPreferences p = c.getSharedPreferences("senal", MODE_PRIVATE);
         String id = p.getString("dev", null);
         if (id == null) {
-            id = UUID.randomUUID().toString().substring(0, 8);
+            // Secreto: el servidor nunca se lo muestra a otros, pero igual se genera largo e impredecible.
+            id = UUID.randomUUID().toString().replace("-", "");
             p.edit().putString("dev", id).apply();
         }
         return id;
@@ -148,8 +153,10 @@ public class SignalService extends Service {
         Request req;
         try {
             // s=1: es el servicio, que no necesita el estado completo de la pantalla de conexión.
-            req = new Request.Builder().url(base + "/?s=1&d=" + deviceId(this)).build();
-        } catch (IllegalArgumentException e) {      // dirección mal escrita: no reintentar en bucle
+            String code = prefs.getString("code", "");
+            req = new Request.Builder().url(base + "/?s=1&d=" + deviceId(this)
+                    + (code.isEmpty() ? "" : "&k=" + URLEncoder.encode(code, "UTF-8"))).build();
+        } catch (IllegalArgumentException | UnsupportedEncodingException e) {      // dirección mal escrita: no reintentar en bucle
             return;
         }
         socket = client.newWebSocket(req, new WebSocketListener() {
@@ -165,8 +172,9 @@ public class SignalService extends Service {
                 if (text.startsWith("{")) { onControl(text); return; }
                 main.post(() -> { if (ws == socket) onSignal("1".equals(text)); });
             }
-            @Override public void onClosed(WebSocket ws, int code, String reason) { lost(ws); }
-            @Override public void onFailure(WebSocket ws, Throwable t, Response r) { lost(ws); }
+            @Override public void onClosing(WebSocket ws, int code, String reason) { ws.close(code, null); }
+            @Override public void onClosed(WebSocket ws, int code, String reason) { lost(ws, code); }
+            @Override public void onFailure(WebSocket ws, Throwable t, Response r) { lost(ws, 0); }
         });
     }
 
@@ -194,14 +202,32 @@ public class SignalService extends Service {
         } catch (JSONException ignored) { }
     }
 
-    private void lost(WebSocket ws) {
+    private void lost(WebSocket ws, int closeCode) {
         main.post(() -> {
             if (ws != socket) return;          // conexión vieja, ya reemplazada
             socket = null;
             onSignal(false);
+            if (closeCode == CLOSE_NEED_CODE) {   // falta el código (o está mal): reintentar no sirve, hay que pedirlo
+                notifyNeedCode();
+                return;
+            }
             long delay = Math.min(60_000L, 2_000L << Math.min(attempt++, 5));   // 2 s ... 60 s
             main.postDelayed(reconnect, delay);
         });
+    }
+
+    private void notifyNeedCode() {
+        PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class),
+                PendingIntent.FLAG_IMMUTABLE);
+        getSystemService(NotificationManager.class).notify(NOTIF_NEED_CODE,
+                new Notification.Builder(this, CHANNEL_REQ)
+                        .setSmallIcon(R.drawable.ic_stat)
+                        .setContentTitle("Falta el código de acceso")
+                        .setContentText("Abrí la app e ingresalo para volver a conectarte")
+                        .setColor(0xFF5865F2)
+                        .setContentIntent(open)
+                        .setAutoCancel(true)
+                        .build());
     }
 
     /** Vibra mientras OTRO dispositivo aprieta (nunca por el toque propio); un toque corto se mantiene un mínimo para que se sienta. */

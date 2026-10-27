@@ -247,6 +247,19 @@
       </div>
     </div>
   </div>
+  <div id="codeModal" class="modal" hidden>
+    <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="ctitle">
+      <div class="mbody">
+        <h3 id="ctitle">Código de acceso</h3>
+        <p id="codeMsg">Este servidor está protegido. Pedile el código a quien lo administra; se guarda en este dispositivo.</p>
+        <label for="codeIn">Código</label>
+        <input id="codeIn" class="field" type="password" maxlength="128" placeholder="Código de acceso" autocomplete="off">
+      </div>
+      <div class="mfoot">
+        <button id="codeOk" class="btn pri">Entrar</button>
+      </div>
+    </div>
+  </div>
   <div id="toast" class="toast" role="status" hidden></div>
 
 <script>
@@ -300,8 +313,16 @@
 
   // En la app nueva (con deviceId) vibra el servicio nativo, así también funciona con la app cerrada.
   const inApp = !!(window.AndroidBridge && AndroidBridge.deviceId);
-  const deviceId = inApp ? AndroidBridge.deviceId() : (store.get('dev') || Math.random().toString(36).slice(2));
+  // El id es secreto (el servidor nunca se lo muestra a otros), así que se genera largo e impredecible.
+  const newDeviceId = () => {
+    try { return [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join(''); }
+    catch { return Array.from({ length: 4 }, () => Math.random().toString(36).slice(2, 10)).join(''); }
+  };
+  const deviceId = inApp ? AndroidBridge.deviceId() : (store.get('dev') || newDeviceId());
   if (!inApp) store.set('dev', deviceId);
+
+  // Código de acceso del servidor (si lo tiene). En la app también lo necesita el servicio, por eso va por el puente.
+  let code = store.get('code') || (inApp && AndroidBridge.getCode ? AndroidBridge.getCode() : '') || '';
 
   // Solo en el navegador (en la app vibra el servicio): vibra mientras aprieta OTRO dispositivo, nunca por
   // el toque propio; un toque corto se mantiene un mínimo para que se sienta.
@@ -341,10 +362,11 @@
   }
 
   // Reconexión: 1 s, 2 s, 4 s, 8 s y después cada 10 s (no machacar al servidor ni la batería si está caído).
-  let retries = 0, retryTimer = null;
+  let retries = 0, retryTimer = null, needCode = false;
   function connect() {
     clearTimeout(retryTimer); retryTimer = null;
-    const sock = ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/?d=' + deviceId);
+    const sock = ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host +
+                                    '/?d=' + deviceId + (code ? '&k=' + encodeURIComponent(code) : ''));
     sock.onopen = () => {
       retries = 0;
       setPill('ok', 'Conectado');
@@ -361,17 +383,42 @@
         st = o; renderStatus(); renderPanel();
       } else if (o.t === 'ev') showEvent(o);
     };
-    sock.onclose = () => {
+    sock.onclose = e => {
       if (sock !== ws) return;   // un socket viejo que ya reemplazamos
-      st = null; setPill('warn', 'Reconectando…'); setOthers(false); renderPanel();
-      retryTimer = setTimeout(connect, Math.min(10000, 1000 * 2 ** retries++));
+      st = null; setOthers(false); renderPanel();
+      if (e.code === 4001) {   // el servidor pide un código de acceso (o el que hay es incorrecto): no reintentar a ciegas
+        setPill('warn', 'Falta el código de acceso');
+        askCode(code ? 'Ese código no es correcto. Probá de nuevo.' : '');
+        return;
+      }
+      setPill('warn', e.code === 4029 ? 'Demasiados intentos, esperá un minuto…' : 'Reconectando…');
+      retryTimer = setTimeout(connect, e.code === 4029 ? 60000 : Math.min(10000, 1000 * 2 ** retries++));
     };
   }
   connect();
   // Al volver a la app (p. ej. después de bloquear el celular) no esperar el reintento: reconectar ya.
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && ws.readyState > 1) { retries = 0; connect(); }
+    if (!document.hidden && ws.readyState > 1 && !needCode) { retries = 0; connect(); }
   });
+
+  function askCode(msg) {
+    needCode = true;
+    $('codeMsg').textContent = msg || 'Este servidor está protegido. Pedile el código a quien lo administra; se guarda en este dispositivo.';
+    $('codeIn').value = '';
+    $('codeModal').hidden = false;
+    $('codeIn').focus();
+  }
+  function saveCode() {
+    const c = $('codeIn').value.trim();
+    if (!c) { $('codeIn').focus(); return; }
+    code = c; store.set('code', c);
+    if (inApp && AndroidBridge.setCode) AndroidBridge.setCode(c);   // el servicio lo usa y se reconecta
+    $('codeModal').hidden = true;
+    needCode = false; retries = 0;
+    connect();
+  }
+  $('codeOk').onclick = saveCode;
+  $('codeIn').addEventListener('keydown', e => { if (e.key === 'Enter') saveCode(); });
 
   function renderStatus() {
     const link = st.links[0], room = st.rooms[0];

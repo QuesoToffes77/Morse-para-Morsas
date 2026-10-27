@@ -115,5 +115,18 @@ public class MainActivity extends Activity {
         public String getName() {
             return prefs.getString("name", "");
         }
+
+        /** Código de acceso del servidor: la página lo pide una vez y el servicio lo necesita para conectarse. */
+        @JavascriptInterface
+        public String getCode() {
+            return prefs.getString("code", "");
+        }
+
+        @JavascriptInterface
+        public void setCode(String c) {
+            prefs.edit().putString("code", c).apply();
+            startForegroundService(new Intent(MainActivity.this, SignalService.class)
+                    .setAction(SignalService.ACTION_RECONNECT));   // reintenta ya con el código nuevo
+        }
     }
 }

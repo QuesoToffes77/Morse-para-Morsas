@@ -37,7 +37,7 @@ netsh advfirewall firewall add rule name="Senal 3000" dir=in action=allow protoc
 
 1. Pasá el APK al celular e instalalo (hay que permitir instalar apps desconocidas).
 2. Con el servidor corriendo, abrí la app una vez. Por defecto va a `http://192.168.1.16:3000`. Si no puede conectarse, muestra un cuadro para escribir la dirección correcta y la guarda.
-3. Aceptá el permiso de notificaciones (Android lo exige para servicios permanentes) y la exención de ahorro de batería, para que Android no duerma la conexión con la pantalla apagada.
+3. Si el servidor tiene código de acceso, la app lo pide la primera vez. Aceptá el permiso de notificaciones (Android lo exige para servicios permanentes) y la exención de ahorro de batería, para que Android no duerma la conexión con la pantalla apagada.
 4. Listo: queda una notificación discreta "Señal activa". Tiene un botón **Detener**; el servicio también arranca solo al prender el celular, salvo que lo hayas detenido.
 
 Cómo cuida la batería: una sola conexión, sin wakelock ni consultas periódicas (solo un ping cada 30 s), reconexión con espera creciente (2 s hasta 60 s) y reintento inmediato cuando vuelve la red. Si el servidor está apagado o estás en otro wifi, casi no consume.
@@ -73,7 +73,7 @@ Para recompilarlo hace falta JDK 17 y el SDK de Android; el proyecto está en [`
 npm test
 ```
 
-Son 34 tests del servidor (usan el runner integrado de Node, no hace falta instalar nada más). Cada uno levanta su propio servidor en un puerto al azar y con un `data.json` temporal. Cubren la señal, las solicitudes (aceptar, rechazar, ignorar, vencer), las reglas de una sola conexión, las salas, todas las desconexiones de la tabla anterior, que los datos sobrevivan a un reinicio, y la robustez ante mensajes basura, mensajes enormes, ids raros, rutas HTTP maliciosas y WebSockets de otros sitios web.
+Son 43 tests del servidor (usan el runner integrado de Node, no hace falta instalar nada más). Cada uno levanta su propio servidor en un puerto al azar y con un `data.json` temporal. Cubren la señal, las solicitudes (aceptar, rechazar, ignorar, vencer), las reglas de una sola conexión, las salas, todas las desconexiones de la tabla anterior, que los datos sobrevivan a un reinicio, y la robustez ante mensajes basura, mensajes enormes, ids raros, rutas HTTP maliciosas, WebSockets de otros sitios web, el código de acceso (incluido el bloqueo), que no se filtren los ids secretos, los límites de mensajes y solicitudes, y el vencimiento de salas vacías.
 
 ## Archivos
 
@@ -86,6 +86,22 @@ Son 34 tests del servidor (usan el runner integrado de Node, no hace falta insta
 | `android-app/` | Proyecto de la app de Android |
 | `Senal.apk` | App ya compilada |
 
-## Ojo
+## Seguridad
 
-No hay contraseña: cualquiera en tu red puede abrir la página y activar la luz. Pensado para uso en casa.
+No hay cuentas ni usuarios. La protección es un **código de acceso compartido** que definís al arrancar el servidor:
+
+```bash
+ACCESS_CODE=mi-clave node server.js          # Linux / Mac / NAS
+$env:ACCESS_CODE="mi-clave"; node server.js  # PowerShell
+```
+
+- Cada dispositivo (página o app) pide el código **una sola vez** y lo recuerda. Sin el código correcto el servidor cierra la conexión: quien no lo sabe no aparece en la lista de personas, no ve nada y no puede mandar señales.
+- Después de 5 códigos incorrectos seguidos desde la misma dirección, esa dirección queda bloqueada un minuto.
+- Si no definís `ACCESS_CODE`, el servidor funciona abierto como antes (y lo avisa al arrancar). **Si lo vas a exponer fuera de tu casa (NAS, servidor), definilo siempre.**
+- Los identificadores de dispositivo (`?d=`) son secretos y largos (32 caracteres). A los demás dispositivos el servidor solo les muestra un identificador público derivado con un hash, así que nadie puede hacerse pasar por otro ni desconectarlo conociendo lo que ve en pantalla.
+- Límites contra abuso: máximo de conexiones por minuto y por dispositivo, de mensajes por segundo, de solicitudes por minuto (10) y de salas (500).
+- Una sala en la que no hay nadie en línea durante 24 horas se borra (`ROOM_TTL_MS` lo cambia).
+
+Variables de entorno del servidor: `PORT`, `ACCESS_CODE`, `DATA_FILE` (dónde guardar `data.json`), `TRUST_PROXY=1` (detrás de un proxy inverso, para contar los intentos por la dirección real del cliente), `ROOM_TTL_MS`.
+
+**Para usarlo desde un NAS o servidor, fuera del wifi de casa:** el código viaja en la dirección de conexión, y con `http` plano cualquiera que mire el tráfico de red podría leerlo. Poné el servidor detrás de un proxy inverso con **HTTPS** (Nginx Proxy Manager, Caddy o el que traiga tu NAS), activá `TRUST_PROXY=1` y abrí solo el puerto del proxy. La página usa `wss://` sola cuando se abre por `https`. En la app de Android, escribí la dirección `https://…` en el cuadro de servidor.

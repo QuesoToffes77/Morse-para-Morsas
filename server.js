@@ -9,10 +9,16 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
 const REQUEST_MS = Number(process.env.REQUEST_MS) || 20000;   // cuánto espera una solicitud
+// Código de acceso compartido (sin cuentas): si está definido, solo entran dispositivos que lo conozcan.
+const ACCESS_CODE = process.env.ACCESS_CODE || '';
+const TRUST_PROXY = process.env.TRUST_PROXY === '1';          // detrás de un proxy inverso (NAS): usar X-Forwarded-For
+const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS) || 24 * 3600 * 1000;   // una sala sin nadie en línea se borra después de esto
+const SWEEP_MS = Number(process.env.SWEEP_MS) || 60000;
 const DATA = process.env.DATA_FILE || path.join(__dirname, 'data.json');
 const html = () => fs.readFileSync(path.join(__dirname, 'index.html'));
 
@@ -28,7 +34,7 @@ try {
   db.links = (Array.isArray(raw.links) ? raw.links : []).filter(k => typeof k === 'string' && k.split('|').length === 2);
   for (const [code, r] of Object.entries(raw.rooms || {}))
     if (r && typeof r.host === 'string' && Array.isArray(r.members) && r.members.every(m => typeof m === 'string'))
-      db.rooms[code] = { host: r.host, members: r.members };
+      db.rooms[code] = { host: r.host, members: r.members, seen: Number.isFinite(r.seen) ? r.seen : Date.now() };
 } catch {}
 // Se guarda en un archivo temporal y se renombra: si el servidor se corta a mitad de la escritura, no queda a medias.
 const save = () => {
@@ -38,7 +44,10 @@ const save = () => {
 
 const key = (a, b) => [a, b].sort().join('|');
 const isLinked = (a, b) => db.links.includes(key(a, b));
-const nameOf = d => db.names[d] || 'Dispositivo ' + d.slice(0, 4);
+// El id de dispositivo (?d=) es SECRETO: quien lo conoce puede hacerse pasar por ese dispositivo. A los demás
+// nunca se les muestra; ven un identificador público derivado con un hash, que no permite recuperar el original.
+const pub = d => crypto.createHash('sha256').update(d).digest('hex').slice(0, 12);
+const nameOf = d => db.names[d] || 'Dispositivo ' + pub(d).slice(0, 4);
 // Sin caracteres de control ni de dirección de texto (que podrían disfrazar o desordenar el nombre).
 const cleanName = n => String(n == null ? '' : n)
   .replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁠-⁩﻿]/g, '').trim().slice(0, 20);
@@ -100,7 +109,27 @@ wss.on('error', () => {}); // ws reenvía los errores del server; los maneja ser
 
 const open = c => c.readyState === 1;
 const socketsOf = dev => [...wss.clients].filter(c => c.dev === dev && open(c));
-const onlineDevs = () => new Set([...wss.clients].filter(open).map(c => c.dev));
+const onlineDevs = () => new Set([...wss.clients].filter(c => open(c) && c.dev).map(c => c.dev));
+/** Dispositivo (id secreto) que corresponde a un identificador público, entre los `pool` dados. */
+const devByPub = (h, pool) => { for (const d of pool) if (pub(d) === h) return d; return null; };
+
+// ---------- Límites contra abuso ----------
+// Contador por ventana de tiempo: devuelve false cuando se pasó del máximo.
+const hits = new Map();   // "tipo:clave" -> [cantidad, vence]
+function rate(kind, k, max, ms) {
+  const id = kind + ':' + k, now = Date.now();
+  let h = hits.get(id);
+  if (!h || h[1] <= now) hits.set(id, h = [0, now + ms]);
+  return ++h[0] <= max;
+}
+setInterval(() => { const now = Date.now(); for (const [k, h] of hits) if (h[1] <= now) hits.delete(k); }, 30000).unref();
+
+const clientIp = req => (TRUST_PROXY && String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || '?';
+const sameCode = k => {   // comparación de tiempo constante
+  const h = s => crypto.createHash('sha256').update(String(s)).digest();
+  return crypto.timingSafeEqual(h(k), h(ACCESS_CODE));
+};
+let socketSeq = 0;
 const pressing = new Set(); // sockets con el botón apretado
 
 // ---------- Señal ----------
@@ -120,25 +149,25 @@ function notify() {
 
 // ---------- Solicitudes (conectar con alguien / unirse a una sala) ----------
 const pending = new Map();   // id -> { id, kind: 'link'|'join', from, to, code, ignored, timer }
-const newId = () => Math.random().toString(36).slice(2, 10);
+const newId = () => crypto.randomBytes(6).toString('hex');
 
 function stateFor(dev) {
   const nb = neighbors(dev);
   const reqs = [...pending.values()];
   return {
     t: 'state',
-    me: { d: dev, n: nameOf(dev) },
+    me: { d: pub(dev), n: nameOf(dev) },
     busy: busy(dev),
-    online: [...onlineDevs()].filter(d => d !== dev).map(d => ({ d, n: nameOf(d), linked: nb.has(d), busy: busy(d) })),
+    online: [...onlineDevs()].filter(d => d !== dev).map(d => ({ d: pub(d), n: nameOf(d), linked: nb.has(d), busy: busy(d) })),
     links: db.links.map(k => k.split('|')).filter(p => p.includes(dev)).map(p => p.find(d => d !== dev))
-      .map(d => ({ d, n: nameOf(d), online: onlineDevs().has(d) })),
+      .map(d => ({ d: pub(d), n: nameOf(d), online: onlineDevs().has(d) })),
     rooms: Object.entries(db.rooms).filter(([, r]) => r.members.includes(dev)).map(([code, r]) => ({
       code, host: r.host === dev, hostName: nameOf(r.host),
       members: r.members.map(m => ({ n: nameOf(m), me: m === dev, online: onlineDevs().has(m) })),
     })),
     inbox: reqs.filter(r => r.to === dev && !r.ignored).map(r => ({ id: r.id, kind: r.kind, code: r.code, from: nameOf(r.from) })),
     sent: reqs.filter(r => r.from === dev).map(r => ({
-      id: r.id, kind: r.kind, to: r.to, toName: nameOf(r.to), code: r.code, left: Math.max(0, r.until - Date.now()),
+      id: r.id, kind: r.kind, to: pub(r.to), toName: nameOf(r.to), code: r.code, left: Math.max(0, r.until - Date.now()),
     })),
   };
 }
@@ -177,6 +206,7 @@ function resolve(req, outcome) {
 function createRequest(ws, kind, to, code) {
   const mine = [...pending.values()].filter(r => r.from === ws.dev);
   if (mine.length >= 10) return fail(ws, 'Demasiadas solicitudes pendientes');
+  if (!rate('req', ws.dev, 10, 60000)) return fail(ws, 'Demasiadas solicitudes seguidas, esperá un minuto');
   if ([...pending.values()].some(r => r.kind === kind && r.code === code &&
         ((r.from === ws.dev && r.to === to) || (r.from === to && r.to === ws.dev))))
     return fail(ws, 'Ya hay una solicitud pendiente');
@@ -205,8 +235,8 @@ function handle(ws, o) {
       break;
     }
     case 'link': {
-      const to = String(o.to);
-      if (to === dev || !onlineDevs().has(to)) return fail(ws, 'Esa persona no está conectada');
+      const to = devByPub(String(o.to), onlineDevs());   // `o.to` es el identificador público, no el id secreto
+      if (!to || to === dev) return fail(ws, 'Esa persona no está conectada');
       if (isLinked(dev, to)) return fail(ws, 'Ya están conectados');
       if (busy(dev)) return fail(ws, 'Ya estás conectado: desconectate primero');
       if (busy(to)) return fail(ws, nameOf(to) + ' ya está conectado con alguien');
@@ -215,7 +245,8 @@ function handle(ws, o) {
     }
     case 'create': {
       if (busy(dev)) return fail(ws, 'Ya estás conectado: desconectate o salí de tu sala primero');
-      db.rooms[newCode()] = { host: dev, members: [dev] };
+      if (Object.values(db.rooms).length >= 500) return fail(ws, 'Hay demasiadas salas');
+      db.rooms[newCode()] = { host: dev, members: [dev], seen: Date.now() };
       save(); broadcastState();
       break;
     }
@@ -243,7 +274,10 @@ function handle(ws, o) {
       break;
     }
     case 'unlink': {
-      db.links = db.links.filter(k => k !== key(dev, String(o.d)));
+      const partners = db.links.map(k => k.split('|')).filter(p => p.includes(dev)).map(p => p.find(d => d !== dev));
+      const other = devByPub(String(o.d), partners);
+      if (!other) return;
+      db.links = db.links.filter(k => k !== key(dev, other));
       save(); broadcastState(); notify();
       break;
     }
@@ -271,22 +305,56 @@ setInterval(() => {
   }
 }, 10000).unref();
 
+// Una sala en la que no hay nadie en línea durante ROOM_TTL_MS se borra (y con ella, su código).
+setInterval(() => {
+  const online = onlineDevs(), now = Date.now();
+  let changed = false;
+  for (const [code, r] of Object.entries(db.rooms)) {
+    if (r.members.some(m => online.has(m))) { r.seen = now; continue; }
+    if (now - (r.seen || now) < ROOM_TTL_MS) continue;
+    delete db.rooms[code];
+    for (const q of [...pending.values()]) if (q.kind === 'join' && q.code === code) resolve(q, 'closed');
+    changed = true;
+  }
+  if (changed) { save(); broadcastState(); notify(); }
+}, SWEEP_MS).unref();
+
+// Cierres con código propio: la página y la app los distinguen de una caída del servidor.
+const CLOSE_NEED_CODE = 4001, CLOSE_BLOCKED = 4029, CLOSE_BUSY = 4008;
+
 wss.on('connection', (ws, req) => {
   const q = new URL(req.url, 'http://x').searchParams;
+  const ip = clientIp(req);
+  ws.dev = null;   // hasta que se acepte la conexión no cuenta como dispositivo
+  ws.on('error', () => {});
+  if (!rate('conn', ip, 120, 60000)) return ws.close(CLOSE_BLOCKED, 'demasiadas conexiones');
+
+  if (ACCESS_CODE) {
+    const k = q.get('k');
+    // Después de 5 códigos incorrectos seguidos desde la misma dirección, se bloquea un minuto (contra adivinar).
+    const f = hits.get('fail:' + ip);
+    if (f && f[1] > Date.now() && f[0] >= 5) return ws.close(CLOSE_BLOCKED, 'demasiados intentos');
+    if (k === null || k === '') return ws.close(CLOSE_NEED_CODE, 'falta el código');
+    if (!sameCode(k)) { rate('fail', ip, 5, 60000); return ws.close(CLOSE_NEED_CODE, 'código incorrecto'); }
+  }
+
   const d = q.get('d');
-  ws.dev = d && /^[\w-]{1,32}$/.test(d) ? d : Math.random().toString(36).slice(2);
+  ws.dev = d && /^[\w-]{1,64}$/.test(d) ? d : crypto.randomBytes(16).toString('hex');
+  if (socketsOf(ws.dev).length >= 8) { ws.dev = null; return ws.close(CLOSE_BUSY, 'demasiadas conexiones de este dispositivo'); }
+  ws.id = ++socketSeq;
   ws.svc = q.get('s') === '1';   // servicio en segundo plano de la app
   ws.last = null;
   ws.alive = true;
   ws.on('pong', () => { ws.alive = true; });
-  // ws emite 'error' (frame inválido, mensaje demasiado grande...); sin este manejador Node tira el proceso.
-  ws.on('error', () => {});
   ws.on('message', raw => {
     try {
       const m = String(raw);
-      if (m === '1') { pressing.add(ws); notify(); }
-      else if (m === '0') { pressing.delete(ws); notify(); }
-      else if (m[0] === '{') {
+      if (m === '1' || m === '0') {
+        if (!rate('sig', ws.id, 100, 5000)) return;   // un humano no aprieta más de ~20 veces por segundo
+        if (m === '1') pressing.add(ws); else pressing.delete(ws);
+        notify();
+      } else if (m[0] === '{') {
+        if (!rate('ctl', ws.id, 40, 10000)) return fail(ws, 'Más despacio');
         let o;
         try { o = JSON.parse(m); } catch { return; }
         if (o && typeof o === 'object' && typeof o.t === 'string') handle(ws, o);
@@ -334,6 +402,8 @@ function start() { server.listen(PORT, '0.0.0.0', onListen); }
 start();
 
 function onListen() {
+  console.log(ACCESS_CODE ? 'Código de acceso: activado (cada dispositivo lo escribe una vez).'
+    : 'Sin código de acceso: cualquiera que llegue al servidor puede entrar. Definí ACCESS_CODE para protegerlo.');
   console.log('Abrí en cualquier dispositivo de la red:');
   for (const list of Object.values(os.networkInterfaces()))
     for (const i of list)

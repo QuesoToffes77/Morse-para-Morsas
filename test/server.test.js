@@ -8,9 +8,12 @@ const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const WebSocket = require('ws');
 
 const ROOT = path.join(__dirname, '..');
+/** Identificador público que el servidor muestra en lugar del id secreto (ver pub() en server.js). */
+const pub = d => crypto.createHash('sha256').update(d).digest('hex').slice(0, 12);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function waitFor(fn, ms = 2500, what = 'la condición') {
@@ -25,21 +28,21 @@ async function waitFor(fn, ms = 2500, what = 'la condición') {
 
 /** Un dispositivo (página o servicio) conectado al servidor. */
 class Client {
-  constructor(srv, dev, { name, svc = false, origin } = {}) {
+  constructor(srv, dev, { name, svc = false, origin, code } = {}) {
     this.dev = dev;
     this.signals = [];   // "1"/"0" recibidos
     this.events = [];    // {t:'ev'} (aceptada, rechazada, error...)
     this.reqs = [];      // {t:'req'} (aviso de solicitud entrante)
     this.st = null;      // último {t:'state'}
     this.closed = false;
-    this.ws = new WebSocket(`ws://127.0.0.1:${srv.port}/?d=${dev}${svc ? '&s=1' : ''}`, origin ? { origin } : {});
+    this.ws = new WebSocket(`ws://127.0.0.1:${srv.port}/?d=${dev}${svc ? '&s=1' : ''}${code != null ? '&k=' + encodeURIComponent(code) : ''}`, origin ? { origin } : {});
     this.ws.on('message', m => {
       m = String(m);
       if (m[0] !== '{') return this.signals.push(m);
       const o = JSON.parse(m);
       if (o.t === 'state') this.st = o; else if (o.t === 'ev') this.events.push(o); else if (o.t === 'req') this.reqs.push(o);
     });
-    this.ws.on('close', () => { this.closed = true; });
+    this.ws.on('close', c => { this.closed = true; this.closeCode = c; });
     this.ws.on('error', e => { this.error = e; });
     this.opened = new Promise((res, rej) => { this.ws.on('open', res); this.ws.on('error', rej); });
     if (name) this.opened.then(() => this.tx({ t: 'name', n: name })).catch(() => {});
@@ -58,11 +61,11 @@ class Client {
   event(k) { return this.events.find(e => e.k === k); }
 }
 
-async function startServer({ dir, port, requestMs = 500 } = {}) {
+async function startServer({ dir, port, requestMs = 500, env = {} } = {}) {
   dir = dir || fs.mkdtempSync(path.join(os.tmpdir(), 'morse-test-'));
   port = port || 41000 + Math.floor(Math.random() * 8000);
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
-    env: { ...process.env, PORT: String(port), DATA_FILE: path.join(dir, 'data.json'), REQUEST_MS: String(requestMs) },
+    env: { ...process.env, PORT: String(port), DATA_FILE: path.join(dir, 'data.json'), REQUEST_MS: String(requestMs), ACCESS_CODE: '', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';
@@ -91,7 +94,7 @@ const withServer = (fn, opts) => async () => {
 
 /** a pide conectarse con b y b acepta. */
 async function link(a, b) {
-  a.tx({ t: 'link', to: b.dev });
+  a.tx({ t: 'link', to: pub(b.dev) });
   await waitFor(() => b.st.inbox.length, 2500, 'la solicitud en la bandeja');
   b.tx({ t: 'answer', id: b.st.inbox[0].id, ok: true });
   await waitFor(() => a.st.links.length && b.st.links.length, 2500, 'la conexión');
@@ -137,7 +140,7 @@ test('si A está con B y B con C, A y C no se ven (no hay transitividad)', withS
   // Una sola conexión a la vez: B no puede estar con A y con C. Se verifica que ni siquiera lo permite.
   const a = await srv.client('aaaa').ready(), b = await srv.client('bbbb').ready(), c = await srv.client('cccc').ready();
   await link(a, b);
-  c.tx({ t: 'link', to: 'bbbb' });
+  c.tx({ t: 'link', to: pub('bbbb') });
   await waitFor(() => c.event('error'), 2500, 'el error de C');
   assert.match(c.event('error').msg, /ya está conectado/);
 }));
@@ -147,7 +150,7 @@ test('si A está con B y B con C, A y C no se ven (no hay transitividad)', withS
 test('aceptar crea la conexión en los dos lados y avisa a quien la mandó', withServer(async srv => {
   const a = await srv.client('aaaa', { name: 'Ana' }).ready(), b = await srv.client('bbbb', { name: 'Beto' }).ready();
   await waitFor(() => a.st.online.some(o => o.n === 'Beto'), 2500, 'que A vea a Beto');
-  a.tx({ t: 'link', to: 'bbbb' });
+  a.tx({ t: 'link', to: pub('bbbb') });
   await waitFor(() => b.st.inbox.length === 1 && a.st.sent.length === 1);
   assert.equal(b.st.inbox[0].from, 'Ana');
   assert.equal(a.st.sent[0].toName, 'Beto');
@@ -160,7 +163,7 @@ test('aceptar crea la conexión en los dos lados y avisa a quien la mandó', wit
 
 test('rechazar no conecta y avisa', withServer(async srv => {
   const a = await srv.client('aaaa').ready(), b = await srv.client('bbbb').ready();
-  a.tx({ t: 'link', to: 'bbbb' });
+  a.tx({ t: 'link', to: pub('bbbb') });
   await waitFor(() => b.st.inbox.length);
   b.tx({ t: 'answer', id: b.st.inbox[0].id, ok: false });
   await waitFor(() => a.event('rejected'));
@@ -170,7 +173,7 @@ test('rechazar no conecta y avisa', withServer(async srv => {
 
 test('ignorar la saca de la bandeja, y a quien la mandó le vence', withServer(async srv => {
   const a = await srv.client('aaaa').ready(), b = await srv.client('bbbb').ready();
-  a.tx({ t: 'link', to: 'bbbb' });
+  a.tx({ t: 'link', to: pub('bbbb') });
   await waitFor(() => b.st.inbox.length);
   b.tx({ t: 'ignore', id: b.st.inbox[0].id });
   await waitFor(() => b.st.inbox.length === 0);
@@ -181,24 +184,24 @@ test('ignorar la saca de la bandeja, y a quien la mandó le vence', withServer(a
 
 test('sin respuesta, la solicitud vence', withServer(async srv => {
   const a = await srv.client('aaaa').ready(), b = await srv.client('bbbb').ready();
-  a.tx({ t: 'link', to: 'bbbb' });
+  a.tx({ t: 'link', to: pub('bbbb') });
   await waitFor(() => a.event('expired'), 3000);
   await waitFor(() => b.st.inbox.length === 0);
 }));
 
 test('no se puede mandar dos solicitudes iguales ni a uno mismo ni a alguien desconectado', withServer(async srv => {
   const a = await srv.client('aaaa').ready(), b = await srv.client('bbbb').ready();
-  a.tx({ t: 'link', to: 'bbbb' }); a.tx({ t: 'link', to: 'bbbb' });
+  a.tx({ t: 'link', to: pub('bbbb') }); a.tx({ t: 'link', to: pub('bbbb') });
   await waitFor(() => a.event('error'));
   assert.match(a.event('error').msg, /pendiente/);
-  a.tx({ t: 'link', to: 'aaaa' }); a.tx({ t: 'link', to: 'nadie' });
+  a.tx({ t: 'link', to: pub('aaaa') }); a.tx({ t: 'link', to: 'nadie' });
   await waitFor(() => a.events.filter(e => e.k === 'error').length === 3);
   assert.equal(a.st.sent.length, 1);
 }));
 
 test('solo el destinatario puede responder', withServer(async srv => {
   const a = await srv.client('aaaa').ready(), b = await srv.client('bbbb').ready(), c = await srv.client('cccc').ready();
-  a.tx({ t: 'link', to: 'bbbb' });
+  a.tx({ t: 'link', to: pub('bbbb') });
   await waitFor(() => b.st.inbox.length);
   c.tx({ t: 'answer', id: b.st.inbox[0].id, ok: true });
   a.tx({ t: 'answer', id: b.st.inbox[0].id, ok: true });
@@ -209,7 +212,7 @@ test('solo el destinatario puede responder', withServer(async srv => {
 
 test('"ok" solo cuenta si es el booleano true', withServer(async srv => {
   const a = await srv.client('aaaa').ready(), b = await srv.client('bbbb').ready();
-  a.tx({ t: 'link', to: 'bbbb' });
+  a.tx({ t: 'link', to: pub('bbbb') });
   await waitFor(() => b.st.inbox.length);
   b.tx({ t: 'answer', id: b.st.inbox[0].id, ok: 'false' });   // texto, no booleano
   await waitFor(() => a.event('rejected') || a.event('accepted'));
@@ -225,8 +228,8 @@ test('con una conexión activa no se puede conectar, crear sala ni unirse a otra
   d.tx({ t: 'create' }); await waitFor(() => d.st.rooms.length);
   const code = d.st.rooms[0].code;
   await link(a, b);
-  a.tx({ t: 'link', to: 'cccc' });   // A ocupada
-  c.tx({ t: 'link', to: 'bbbb' });   // B ocupada
+  a.tx({ t: 'link', to: pub('cccc') });   // A ocupada
+  c.tx({ t: 'link', to: pub('bbbb') });   // B ocupada
   a.tx({ t: 'create' });             // A ocupada
   a.tx({ t: 'join', code });         // A ocupada
   await waitFor(() => a.events.filter(e => e.k === 'error').length === 3 && c.event('error'));
@@ -236,7 +239,7 @@ test('con una conexión activa no se puede conectar, crear sala ni unirse a otra
 
 test('si alguien se ocupa mientras la solicitud espera, al aceptar se cancela', withServer(async srv => {
   const a = await srv.client('aaaa').ready(), b = await srv.client('bbbb').ready(), c = await srv.client('cccc').ready();
-  a.tx({ t: 'link', to: 'bbbb' });
+  a.tx({ t: 'link', to: pub('bbbb') });
   await waitFor(() => b.st.inbox.length);
   b.tx({ t: 'create' });   // B arma una sala: ahora está ocupada
   await waitFor(() => b.st.rooms.length);
@@ -262,7 +265,7 @@ test('sala: se crea, se une quien el anfitrión acepta y comparten señal', with
     host.tx({ t: 'answer', id: host.st.inbox[0].id, ok: true });
     await waitFor(() => m.st.rooms.length);
   }
-  assert.deepEqual(host.st.rooms[0].members.map(x => x.n).sort(), ['Hugo', 'Mia', 'Dispositivo mmm2'].sort());
+  assert.deepEqual(host.st.rooms[0].members.map(x => x.n).sort(), ['Hugo', 'Mia', 'Dispositivo ' + pub('mmm2').slice(0, 4)].sort());
   m1.press();
   await waitFor(() => host.last === '1' && m2.last === '1');
   await sleep(100);
@@ -362,7 +365,7 @@ test('con la app cerrada (solo el servicio), el dispositivo sigue en línea y re
 
 test('si quien mandó la solicitud se desconecta, desaparece de la bandeja del otro', withServer(async srv => {
   const a = await srv.client('aaaa').ready(), b = await srv.client('bbbb').ready();
-  a.tx({ t: 'link', to: 'bbbb' });
+  a.tx({ t: 'link', to: pub('bbbb') });
   await waitFor(() => b.st.inbox.length === 1);
   await a.close();
   await waitFor(() => b.st.inbox.length === 0, 2500, 'que se limpie la bandeja');
@@ -370,7 +373,7 @@ test('si quien mandó la solicitud se desconecta, desaparece de la bandeja del o
 
 test('si el destinatario se desconecta, quien esperaba se entera enseguida', withServer(async srv => {
   const a = await srv.client('aaaa').ready(), b = await srv.client('bbbb', { name: 'Beto' }).ready();
-  a.tx({ t: 'link', to: 'bbbb' });
+  a.tx({ t: 'link', to: pub('bbbb') });
   await waitFor(() => b.st.inbox.length === 1);
   await b.close();
   await waitFor(() => a.event('offline'), 400, 'el aviso de desconexión (antes de que venza)');
@@ -468,7 +471,7 @@ test('ids de dispositivo raros no rompen nada', withServer(async srv => {
   const b = await srv.client('bbbb').ready();
   await waitFor(() => b.st.online.length >= 1);
   for (const o of b.st.online) assert.equal(typeof o.n, 'string', 'el nombre debe ser texto: ' + JSON.stringify(o));
-  b.tx({ t: 'link', to: '__proto__' });
+  b.tx({ t: 'link', to: pub('__proto__') });
   await waitFor(() => weird.st.inbox.length === 1);
   assert.equal(typeof weird.st.inbox[0].from, 'string');
   assert.ok(srv.alive());
@@ -525,3 +528,97 @@ test('el JavaScript de la página no tiene errores de sintaxis', () => {
   const script = html.match(/<script>([\s\S]*)<\/script>/)[1];
   assert.doesNotThrow(() => new Function(script));
 });
+
+// ---------------------------------------------------------------- seguridad
+
+/** Intenta conectar y devuelve cómo terminó: 'open' o el código con el que el servidor cerró. */
+function attempt(srv, query) {
+  return new Promise(resolve => {
+    const ws = new WebSocket(`ws://127.0.0.1:${srv.port}/?${query}`);
+    // El servidor acepta el upgrade y, si no corresponde, cierra enseguida con un código propio.
+    ws.on('open', () => setTimeout(() => resolve({ ws, result: 'open' }), 200));
+    ws.on('close', code => resolve({ result: code }));
+    ws.on('error', () => {});
+  });
+}
+
+test('con ACCESS_CODE: sin código o con código malo se rechaza; con el bueno se entra', withServer(async srv => {
+  const none = await attempt(srv, 'd=aaaaaaaa');
+  assert.equal(none.result, 4001);
+  const bad = await attempt(srv, 'd=aaaaaaaa&k=otra');
+  assert.equal(bad.result, 4001);
+  const good = await attempt(srv, 'd=aaaaaaaa&k=' + encodeURIComponent('mi clave/ñ&='));
+  assert.equal(good.result, 'open');
+  good.ws.close();
+}, { env: { ACCESS_CODE: 'mi clave/ñ&=' } }));
+
+test('con ACCESS_CODE: quien no entró no aparece en la lista ni recibe nada', withServer(async srv => {
+  const a = await srv.client('aaaaaaaa', { code: 'clave' }).ready();
+  const intruder = srv.client('iiiiiiii', { code: 'mala' });
+  await waitFor(() => intruder.closed, 2500, 'que el intruso sea rechazado');
+  assert.equal(intruder.closeCode, 4001);
+  assert.equal(a.st.online.length, 0, 'el intruso no debe figurar como conectado');
+  assert.deepEqual(intruder.signals, []);
+  assert.equal(intruder.st, null);
+}, { env: { ACCESS_CODE: 'clave' } }));
+
+test('después de 5 códigos malos desde la misma dirección se bloquea, incluso con el código bueno', withServer(async srv => {
+  for (let i = 0; i < 5; i++) assert.equal((await attempt(srv, 'd=xxxxxxxx&k=mala' + i)).result, 4001);
+  assert.equal((await attempt(srv, 'd=xxxxxxxx&k=clave')).result, 4029);
+}, { env: { ACCESS_CODE: 'clave' } }));
+
+test('sin ACCESS_CODE se entra sin pedir nada', withServer(async srv => {
+  const r = await attempt(srv, 'd=aaaaaaaa');
+  assert.equal(r.result, 'open');
+  r.ws.close();
+}));
+
+test('los demás nunca ven el id secreto de un dispositivo, solo uno público', withServer(async srv => {
+  const a = await srv.client('secreto-de-A', { name: 'Ana' }).ready(), b = await srv.client('secreto-de-B', { name: 'Beto' }).ready();
+  await link(a, b);
+  const todo = JSON.stringify([a.st, b.st, a.events, b.events]);
+  assert.ok(!todo.includes('secreto-de-A') && !todo.includes('secreto-de-B'), 'se filtró un id secreto: ' + todo);
+  assert.equal(b.st.links[0].d, pub('secreto-de-A'));
+}));
+
+test('conocer el id público no sirve para hacerse pasar por otro ni para desconectarlo', withServer(async srv => {
+  const a = await srv.client('aaaaaaaa', { name: 'Ana' }).ready(), b = await srv.client('bbbbbbbb', { name: 'Beto' }).ready();
+  const c = await srv.client('cccccccc', { name: 'Cris' }).ready();
+  await link(a, b);
+  c.tx({ t: 'unlink', d: pub('aaaaaaaa') });   // C no es parte de esa conexión
+  await sleep(150);
+  assert.equal(a.st.links.length, 1);
+  assert.equal(b.st.links.length, 1);
+  c.tx({ t: 'link', to: 'aaaaaaaa' });          // el id secreto no es un identificador válido para otros
+  await waitFor(() => c.event('error'), 2500, 'el error por id inexistente');
+}));
+
+test('límite de mensajes: un cliente que manda de más no tumba el servidor ni a los demás', withServer(async srv => {
+  const a = await srv.client('aaaaaaaa').ready(), b = await srv.client('bbbbbbbb').ready();
+  for (let i = 0; i < 300; i++) a.tx({ t: 'name', n: 'x' + i });
+  await waitFor(() => a.events.some(e => e.k === 'error' && /despacio/.test(e.msg)), 2500, 'el aviso de "más despacio"');
+  assert.ok(srv.alive());
+  assert.ok(b.ws.readyState === 1);
+}));
+
+test('límite de solicitudes por minuto', withServer(async srv => {
+  const a = await srv.client('aaaaaaaa').ready();
+  const others = [];
+  for (let i = 0; i < 12; i++) others.push(await srv.client('dev-' + String(i).padStart(7, '0')).ready());
+  for (const o of others) a.tx({ t: 'link', to: pub(o.dev) });
+  await waitFor(() => a.events.some(e => e.k === 'error' && /Demasiadas/.test(e.msg)), 2500, 'el límite de solicitudes');
+  assert.ok(a.st.sent.length <= 10);
+}));
+
+test('una sala sin nadie en línea se borra pasado el tiempo; con alguien en línea se conserva', withServer(async srv => {
+  const host = await srv.client('hhhhhhhh', { name: 'Hugo' }).ready();
+  host.tx({ t: 'create' });
+  await waitFor(() => host.st.rooms.length);
+  await sleep(700);   // el anfitrión sigue en línea: la sala no vence
+  assert.equal(host.st.rooms.length, 1);
+  await host.close();
+  await sleep(1000);  // nadie en línea más que el TTL (300 ms)
+  const again = await srv.client('hhhhhhhh').ready();
+  await sleep(150);
+  assert.equal(again.st.rooms.length, 0, 'la sala vacía debía borrarse');
+}, { env: { ROOM_TTL_MS: '300', SWEEP_MS: '100' } }));
