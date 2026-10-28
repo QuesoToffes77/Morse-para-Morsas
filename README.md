@@ -57,6 +57,24 @@ Cómo cuida la batería: una sola conexión, sin wakelock ni consultas periódic
 
 **Firma:** el APK está firmado con una clave propia (release), no la de debug de Android. Android puede seguir mostrando el aviso de "app de origen desconocido" la primera vez, pero la app ya tiene una firma estable. La clave vive fuera del repositorio, en `~/.morse-keys/` (`morse-release.jks` y `keystore.properties`), y **hay que guardarla en un lugar seguro**: sin ella no se pueden publicar actualizaciones que se instalen encima de la anterior. Si el archivo no existe (por ejemplo, otra persona que clonó el repo), se compila con la clave de debug. Se genera con `gradle assembleRelease`.
 
+### Actualizar la app desde la propia app
+
+Arriba del panel **Conexión** hay una **ruedita** (ajustes) con dos opciones:
+
+- **Actualizar:** busca en GitHub una versión nueva de la app. Si hay, la descarga, comprueba que sea el archivo publicado (SHA-256) y la instala encima, sin perder tu nombre ni tus conexiones. Ya no hace falta pasar el APK a mano cada vez. La primera vez Android pide un permiso ("permitir instalar desde esta fuente") y, en cada actualización, que confirmes la instalación. Al terminar, el servicio de segundo plano se reinicia solo. (En el navegador, "Actualizar" solo recarga la página.)
+- **Código de acceso:** para cambiar el código que usa este dispositivo.
+
+Cómo funciona: la app lee [`latest.json`](latest.json) del repositorio y lo compara con su versión instalada. Las direcciones de descarga están fijas en el código, y Android solo acepta la actualización si está firmada con **la misma clave** que la app instalada, así que un APK ajeno no puede reemplazarla. Los cambios de la **página** (lo que ves en pantalla) llegan solos al actualizar el servidor; el APK solo hace falta actualizarlo cuando cambia la parte nativa (servicio, vibración, notificaciones).
+
+Para publicar una versión nueva:
+
+1. Subí `versionCode` y `versionName` en `android-app/app/build.gradle`.
+2. Compilá con `gradle assembleRelease` y copiá `app/build/outputs/apk/release/app-release.apk` a `Senal.apk`.
+3. Corré `npm run release-info -- "qué cambió"`: genera `latest.json` con la versión, el tamaño y el hash del APK. **Hay que repetirlo cada vez que se recompila**, porque el hash cambia.
+4. Subí `Senal.apk` y `latest.json` juntos a GitHub. Los tests comprueban que coincidan.
+
+La primera versión con esta función hay que instalarla a mano una vez; de ahí en adelante se actualiza desde la ruedita.
+
 Para recompilarlo hace falta JDK 17 y el SDK de Android; el proyecto está en [`android-app/`](android-app) y se genera con `gradle assembleRelease` (o `assembleDebug`).
 
 ## Cómo funciona
@@ -88,7 +106,7 @@ Para recompilarlo hace falta JDK 17 y el SDK de Android; el proyecto está en [`
 npm test
 ```
 
-Son 54 tests del servidor (usan el runner integrado de Node, no hace falta instalar nada más). Cada uno levanta su propio servidor en un puerto al azar y con un `data.json` temporal. Cubren la señal, las solicitudes (aceptar, rechazar, ignorar, vencer), las reglas de una sola conexión, las salas, todas las desconexiones de la tabla anterior, que los datos sobrevivan a un reinicio, y la robustez ante mensajes basura, mensajes enormes, ids raros, rutas HTTP maliciosas, WebSockets de otros sitios web, el código de acceso (incluido el bloqueo), que no se filtren los ids secretos, los límites de mensajes y solicitudes, el vencimiento de salas vacías y los turnos de palabra (uno solo habla, espera de 500 ms, desconexión de quien habla), que los cambios seguidos se agrupen en un solo estado, y el funcionamiento detrás de un túnel (escuchar solo en 127.0.0.1, IP real del visitante).
+Son 56 tests del servidor (usan el runner integrado de Node, no hace falta instalar nada más). Cada uno levanta su propio servidor en un puerto al azar y con un `data.json` temporal. Cubren la señal, las solicitudes (aceptar, rechazar, ignorar, vencer), las reglas de una sola conexión, las salas, todas las desconexiones de la tabla anterior, que los datos sobrevivan a un reinicio, y la robustez ante mensajes basura, mensajes enormes, ids raros, rutas HTTP maliciosas, WebSockets de otros sitios web, el código de acceso (incluido el bloqueo), que no se filtren los ids secretos, los límites de mensajes y solicitudes, el vencimiento de salas vacías y los turnos de palabra (uno solo habla, espera de 500 ms, desconexión de quien habla), que los cambios seguidos se agrupen en un solo estado, y el funcionamiento detrás de un túnel (escuchar solo en 127.0.0.1, IP real del visitante).
 
 ## Archivos
 
@@ -100,6 +118,8 @@ Son 54 tests del servidor (usan el runner integrado de Node, no hace falta insta
 | `public/` | Logo e íconos (los sirve el servidor) |
 | `android-app/` | Proyecto de la app de Android |
 | `Senal.apk` | App ya compilada |
+| `latest.json` | Versión y hash de `Senal.apk`; la app lo consulta para actualizarse |
+| `scripts/` | `release-info.js`: genera `latest.json` |
 
 ## Seguridad
 

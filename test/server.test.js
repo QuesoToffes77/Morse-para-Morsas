@@ -759,3 +759,34 @@ test('con TRUST_PROXY=1, un X-Forwarded-For falso no sirve para evadir el bloque
   for (let i = 0; i < 5; i++) assert.equal(await tryWith('10.0.0.' + i), 4001);   // el primero cambia, el último (del proxy) no
   assert.equal(await tryWith('10.0.0.99'), 4029);
 }, { env: { ACCESS_CODE: 'clave', TRUST_PROXY: '1' } }));
+
+// ---------------------------------------------------------------- actualización de la app
+
+test('release-info genera latest.json con versión, tamaño y SHA-256 del APK', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'morse-rel-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'build.gradle'), 'android { defaultConfig { versionCode 7\n versionName "7.1" } }');
+    fs.writeFileSync(path.join(dir, 'a.apk'), Buffer.from('contenido de prueba'));
+    const r = require('node:child_process').spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'release-info.js'), 'Notas de prueba'], {
+      env: { ...process.env, GRADLE_FILE: path.join(dir, 'build.gradle'), APK_FILE: path.join(dir, 'a.apk'), OUT_FILE: path.join(dir, 'latest.json') },
+    });
+    assert.equal(r.status, 0, String(r.stderr));
+    const info = JSON.parse(fs.readFileSync(path.join(dir, 'latest.json'), 'utf8'));
+    assert.deepEqual(info, {
+      versionCode: 7, versionName: '7.1', size: 19, notes: 'Notas de prueba',
+      sha256: crypto.createHash('sha256').update('contenido de prueba').digest('hex'),
+    });
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('latest.json del repositorio describe exactamente el Senal.apk y la versión de build.gradle', () => {
+  // Si no coinciden, la app descargaría un archivo que no pasa la verificación y la actualización fallaría.
+  const info = JSON.parse(fs.readFileSync(path.join(ROOT, 'latest.json'), 'utf8'));
+  const apk = fs.readFileSync(path.join(ROOT, 'Senal.apk'));
+  const gradle = fs.readFileSync(path.join(ROOT, 'android-app', 'app', 'build.gradle'), 'utf8');
+  assert.equal(info.sha256, crypto.createHash('sha256').update(apk).digest('hex'), 'el hash no coincide: corré "npm run release-info" después de compilar');
+  assert.equal(info.size, apk.length);
+  assert.equal(info.versionCode, Number(/versionCode\s+(\d+)/.exec(gradle)[1]));
+  assert.equal(info.versionName, /versionName\s+"([^"]+)"/.exec(gradle)[1]);
+  assert.match(info.sha256, /^[0-9a-f]{64}$/);
+});

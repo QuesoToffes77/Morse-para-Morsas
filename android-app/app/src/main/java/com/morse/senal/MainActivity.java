@@ -19,10 +19,20 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
 
+import org.json.JSONObject;
+
 public class MainActivity extends Activity {
     private WebView web;
     private SharedPreferences prefs;
     private boolean dialogOpen = false;
+    private Updater updater;
+
+    @Override
+    protected void onDestroy() {
+        Updater.setSink(null);
+        if (updater != null) updater.shutdown();
+        super.onDestroy();
+    }
 
     @Override
     protected void onCreate(Bundle b) {
@@ -42,6 +52,10 @@ public class MainActivity extends Activity {
         });
         web.setBackgroundColor(0xFF313338);   // sin destello blanco antes de que cargue la página
         setContentView(web);
+
+        // Los avisos del actualizador llegan a la página (window.__upd) como JSON.
+        updater = new Updater(this);
+        Updater.setSink(o -> web.post(() -> web.evaluateJavascript("window.__upd&&window.__upd(" + o + ")", null)));
         web.loadUrl(prefs.getString("url", SignalService.DEFAULT_URL));
 
         startService();
@@ -115,6 +129,20 @@ public class MainActivity extends Activity {
         public String getName() {
             return prefs.getString("name", "");
         }
+
+        /** Versión instalada, para mostrarla en el menú de ajustes. */
+        @JavascriptInterface
+        public String appInfo() {
+            return "{\"versionName\":" + JSONObject.quote(updater.currentName()) + ",\"versionCode\":" + updater.currentCode() + "}";
+        }
+
+        /** Busca una versión nueva en GitHub; el resultado vuelve por window.__upd. */
+        @JavascriptInterface
+        public void checkUpdate() { updater.check(); }
+
+        /** Descarga la versión nueva y pide a Android que la instale encima. */
+        @JavascriptInterface
+        public void installUpdate() { updater.install(); }
 
         /** Código de acceso del servidor: la página lo pide una vez y el servicio lo necesita para conectarse. */
         @JavascriptInterface

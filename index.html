@@ -115,7 +115,22 @@
   .card { width:100%; height:100%; background:var(--bg2); display:flex; flex-direction:column; animation:up .22s cubic-bezier(.2,.8,.2,1); }
   .shead { display:flex; align-items:center; gap:8px; padding:max(8px, env(safe-area-inset-top)) 8px 8px;
            box-shadow:0 1px 0 var(--line); }
+  .shead { position:relative; }
   .shead h2 { margin:0; font-size:17px; font-weight:700; color:var(--strong); flex:1; }
+  .gmenu { position:absolute; right:8px; top:calc(100% - 2px); z-index:5; min-width:240px; max-width:calc(100% - 16px);
+           background:var(--bg0); border:1px solid var(--line); border-radius:12px; padding:6px;
+           box-shadow:0 12px 32px rgba(0,0,0,.5); animation:pop2 .12s ease-out; }
+  .gitem { display:flex; align-items:center; gap:12px; width:100%; padding:10px 12px; border:0; border-radius:8px;
+           background:none; color:var(--text); text-align:left; }
+  .gitem:hover, .gitem:focus-visible { background:var(--bg3); }
+  .gitem .gt { display:flex; flex-direction:column; min-width:0; }
+  .gitem b { color:var(--strong); font-weight:600; font-size:15px; }
+  .gitem small { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+  .iconbtn[aria-expanded="true"] { background:var(--bg3); color:var(--strong); }
+  #updMsg { white-space:pre-line; overflow-wrap:anywhere; }
+  .bar { height:8px; border-radius:4px; background:var(--bg0); overflow:hidden; margin:0 0 6px; }
+  .bar i { display:block; height:100%; width:0; background:var(--green); transition:width .15s linear; }
+  @keyframes pop2 { from { transform:translateY(-6px); opacity:0; } }
   .iconbtn { width:40px; height:40px; border-radius:50%; border:0; background:none; color:var(--muted);
              display:flex; align-items:center; justify-content:center; }
   .iconbtn:hover { background:var(--bg3); color:var(--strong); }
@@ -254,6 +269,8 @@
       <div class="shead">
         <button id="close" class="iconbtn" aria-label="Volver"></button>
         <h2>Conexión</h2>
+        <button id="gear" class="iconbtn" aria-label="Ajustes" aria-haspopup="menu" aria-expanded="false"></button>
+        <div id="gmenu" class="gmenu" role="menu" hidden></div>
       </div>
       <div id="profile" class="profile"></div>
       <div class="tabs" role="tablist">
@@ -288,7 +305,21 @@
         <input id="codeIn" class="field" type="password" maxlength="128" placeholder="Código de acceso" autocomplete="off">
       </div>
       <div class="mfoot">
+        <button id="codeCancel" class="btn ghost" hidden>Cancelar</button>
         <button id="codeOk" class="btn pri">Entrar</button>
+      </div>
+    </div>
+  </div>
+  <div id="updModal" class="modal" hidden>
+    <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="utitle">
+      <div class="mbody">
+        <h3 id="utitle">Actualizar</h3>
+        <p id="updMsg"></p>
+        <div id="updBar" class="bar" hidden><i></i></div>
+      </div>
+      <div class="mfoot">
+        <button id="updClose" class="btn ghost">Cerrar</button>
+        <button id="updGo" class="btn pri" hidden></button>
       </div>
     </div>
   </div>
@@ -316,6 +347,9 @@
     addUser: 'M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
     bell: 'M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z',
     warn: 'M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z',
+    gear: 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z',
+    refresh: 'M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z',
+    key: 'M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z',
   };
   function ic(name) {
     const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -325,6 +359,7 @@
   }
   $('dockIc').replaceWith(ic('people'));
   $('close').append(ic('back'));
+  $('gear').append(ic('gear'));
 
   // ---------- Estado de la señal ----------
   let held = false, others = false, ws, vibTimer = null;
@@ -488,8 +523,9 @@
     if (!document.hidden && ws.readyState > 1 && !needCode) { retries = 0; connect(); }
   });
 
-  function askCode(msg) {
-    needCode = true;
+  function askCode(msg, voluntary) {
+    needCode = !voluntary;   // si lo abrió la persona desde Ajustes, la conexión sigue funcionando mientras tanto
+    $('codeCancel').hidden = !voluntary;
     $('codeMsg').textContent = msg || 'Este servidor está protegido. Pedile el código a quien lo administra; se guarda en este dispositivo.';
     $('codeIn').value = '';
     $('codeModal').hidden = false;
@@ -502,9 +538,12 @@
     if (inApp && AndroidBridge.setCode) AndroidBridge.setCode(c);   // el servicio lo usa y se reconecta
     $('codeModal').hidden = true;
     needCode = false; retries = 0;
+    const old = ws;
     connect();
+    try { old.close(); } catch {}   // la conexión vieja (con el código anterior) ya no hace falta
   }
   $('codeOk').onclick = saveCode;
+  $('codeCancel').onclick = () => { $('codeModal').hidden = true; };
   $('codeIn').addEventListener('keydown', e => { if (e.key === 'Enter') saveCode(); });
 
   function renderStatus() {
@@ -695,8 +734,77 @@
   $('sheet').addEventListener('click', e => { if (e.target === $('sheet')) closeSheet(); });
   addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
-    if (!$('modal').hidden) { if (name) $('modal').hidden = true; } else closeSheet();
+    if (!menu.hidden) closeMenu();
+    else if (!$('updModal').hidden) $('updModal').hidden = true;
+    else if (!$('codeModal').hidden) { if (!$('codeCancel').hidden) $('codeModal').hidden = true; }
+    else if (!$('modal').hidden) { if (name) $('modal').hidden = true; } else closeSheet();
   });
+  // ---------- Ajustes (engranaje): actualizar y código de acceso ----------
+  const menu = $('gmenu');
+  function menuItem(icon, title, sub, onclick) {
+    return el('button', { class: 'gitem', role: 'menuitem', onclick: () => { closeMenu(); onclick(); } },
+      ic(icon), el('span', { class: 'gt' }, el('b', {}, title), el('small', {}, sub)));
+  }
+  function appVersion() {
+    try { return inApp && AndroidBridge.appInfo ? JSON.parse(AndroidBridge.appInfo()).versionName : ''; } catch { return ''; }
+  }
+  function openMenu() {
+    const v = appVersion();
+    menu.replaceChildren(
+      menuItem('refresh', 'Actualizar', inApp ? 'Versión ' + (v || '?') + ' · buscar una nueva en GitHub' : 'Recargar la página', startUpdate),
+      menuItem('key', 'Código de acceso', 'Cambiar el código de este dispositivo',
+               () => askCode('Escribí el código de acceso del servidor.', true)));
+    menu.hidden = false;
+    $('gear').setAttribute('aria-expanded', 'true');
+    menu.querySelector('.gitem').focus();
+  }
+  function closeMenu() { menu.hidden = true; $('gear').setAttribute('aria-expanded', 'false'); }
+  $('gear').onclick = e => { e.stopPropagation(); menu.hidden ? openMenu() : closeMenu(); };
+  document.addEventListener('click', e => { if (!menu.hidden && !menu.contains(e.target)) closeMenu(); });
+
+  // En el navegador la página siempre es la última (la sirve el servidor): "Actualizar" solo la recarga.
+  // En la app, además se puede bajar el APK nuevo de GitHub; lo hace la parte nativa y avisa por window.__upd.
+  let updRetry = false, updLatest = '';
+  function startUpdate() {
+    if (!inApp) return location.reload();
+    if (!AndroidBridge.checkUpdate)
+      return showUpd('error', { msg: 'Esta versión de la app todavía no se actualiza sola. Instalá el APK nuevo una vez; desde ahí en adelante se actualiza desde acá.' });
+    showUpd('checking');
+    AndroidBridge.checkUpdate();
+  }
+  function showUpd(state, o) {
+    o = o || {};
+    let msg, label = null, pct = null;
+    updRetry = false;
+    switch (state) {
+      case 'checking': msg = 'Buscando actualizaciones…'; break;
+      case 'none': msg = 'Ya tenés la última versión (' + o.cur + ').'; break;
+      case 'available':
+        msg = 'Hay una versión nueva: ' + o.latest + ' (tenés la ' + o.cur + ').' + (o.size ? ' Pesa ' + (o.size / 1048576).toFixed(1) + ' MB.' : '') +
+              ' Se descarga de GitHub y se instala encima, sin perder tu nombre ni tus conexiones.' + (o.notes ? '\n\n' + o.notes : '');
+        label = 'Descargar e instalar'; updLatest = o.latest; break;
+      case 'progress': msg = 'Descargando la versión ' + (o.latest || '') + '…' + (o.pct >= 0 ? ' ' + o.pct + '%' : ''); pct = Math.max(0, o.pct || 0); break;
+      case 'confirm': msg = 'Listo. Confirmá la instalación en la ventana de Android; la app se reinicia sola al terminar.'; pct = 100; break;
+      case 'perm':
+        msg = 'Android necesita tu permiso para instalar desde esta app: activá "Permitir desde esta fuente" en la pantalla que se abrió, volvé acá y tocá de nuevo Descargar e instalar.';
+        label = 'Descargar e instalar'; break;
+      default: msg = o.msg || 'No se pudo actualizar.'; label = 'Reintentar'; updRetry = true;
+    }
+    $('updMsg').textContent = msg;   // textContent: lo que llega de afuera nunca se interpreta como HTML
+    $('updBar').hidden = pct == null;
+    $('updBar').firstElementChild.style.width = (pct || 0) + '%';
+    $('updGo').hidden = !label;
+    if (label) $('updGo').textContent = label;
+    $('updModal').hidden = false;
+  }
+  window.__upd = o => showUpd(o.state, o);   // la app nativa informa el avance por acá
+  $('updGo').onclick = () => {
+    if (updRetry) return startUpdate();
+    showUpd('progress', { pct: 0, latest: updLatest });
+    AndroidBridge.installUpdate();
+  };
+  $('updClose').onclick = () => { $('updModal').hidden = true; };
+
   // Cuenta regresiva de las solicitudes enviadas, sin rehacer el panel (así no se pierde lo que se escribe).
   setInterval(() => document.querySelectorAll('[data-end]').forEach(e => { e.textContent = secs(+e.dataset.end); }), 500);
 
